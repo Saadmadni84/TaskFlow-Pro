@@ -5,3 +5,4 @@ export * from './dependencies';
 export * from './scheduling';
 export * from './ai';
 export * from './criticalPath';
+export * from './dependencyGraph';

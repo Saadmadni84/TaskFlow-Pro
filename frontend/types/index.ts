@@ -173,3 +173,27 @@ export interface ApiErrorResponse {
   path: string;
   details?: ApiValidationErrorDetail[];
 }
+
+export interface DependencyGraphNode {
+  id: string;
+  title: string;
+  workflowStatus: TaskStatus;
+  dependencyStatus: DependencyStatus;
+  scheduledStartDate?: string;
+  scheduledDueDate?: string;
+  plannedStartDate?: string;
+  durationDays?: number;
+}
+
+export interface DependencyGraphEdge {
+  id: string;
+  predecessorTaskId: string;
+  successorTaskId: string;
+}
+
+export interface DependencyGraph {
+  projectId: string;
+  nodes: DependencyGraphNode[];
+  edges: DependencyGraphEdge[];
+}
+

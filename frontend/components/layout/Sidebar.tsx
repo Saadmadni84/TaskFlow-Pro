@@ -13,6 +13,7 @@ interface NavItem {
 
 const PRIMARY_WORKSPACE: NavItem[] = [
   { name: 'Kanban Board', href: '/kanban', badge: 'Phase 9', badgeVariant: 'implemented' },
+  { name: 'Visual DAG Graph', href: '/graph', badge: 'Visual DAG', badgeVariant: 'implemented' },
 ];
 
 const ARCHITECTURE_PHASES: NavItem[] = [

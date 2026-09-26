@@ -14,14 +14,17 @@ import { TaskDeleteDialog } from '@/components/task/TaskDeleteDialog';
 import { ProjectCreateDialog } from '@/components/project/ProjectCreateDialog';
 import { BoardSkeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
+import { DependencyGraphView } from '@/components/graph/DependencyGraphView';
 
 interface KanbanWorkspaceProps {
   initialProjectId?: string;
+  initialView?: 'KANBAN' | 'GRAPH';
 }
 
 type FilterState = 'ALL' | 'READY' | 'BLOCKED';
 
-export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProjectId }) => {
+export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProjectId, initialView = 'KANBAN' }) => {
+  const [activeView, setActiveView] = useState<'KANBAN' | 'GRAPH'>(initialView);
   // 1. Projects state
   const {
     projects,
@@ -184,6 +187,44 @@ export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProject
         </div>
       </div>
 
+      {/* View Switcher: Kanban vs Visual DAG */}
+      <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 text-xs font-mono">
+          <button
+            type="button"
+            onClick={() => setActiveView('KANBAN')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all ${
+              activeView === 'KANBAN'
+                ? 'bg-zinc-800 text-emerald-400 font-semibold shadow-sm border border-emerald-500/20'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+            </svg>
+            <span>Kanban Board</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView('GRAPH')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all ${
+              activeView === 'GRAPH'
+                ? 'bg-zinc-800 text-emerald-400 font-semibold shadow-sm border border-emerald-500/20'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+            <span>Visual DAG Graph</span>
+          </button>
+        </div>
+
+        <div className="text-[11px] font-mono text-zinc-500 hidden sm:block">
+          {activeView === 'KANBAN' ? 'Drag & Drop Task Workflow' : 'Deterministic Topological Projection'}
+        </div>
+      </div>
+
       {/* Global Action / Concurrency / Cycle Error Banner */}
       {actionError && (
         <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-800/80 text-rose-200 text-xs flex items-center justify-between animate-in fade-in duration-150">
@@ -217,7 +258,8 @@ export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProject
         </div>
       )}
 
-      {/* Toolbar: Actions, Filters, Search */}
+      {/* Toolbar: Actions, Filters, Search (only in Kanban view) */}
+      {activeView === 'KANBAN' && (
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Left Toolbar Actions */}
         <div className="flex items-center gap-2">
@@ -301,8 +343,9 @@ export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProject
           </div>
         </div>
       </div>
+      )}
 
-      {/* Main Board Area */}
+      {/* Main Content Area: Kanban vs Visual DAG */}
       {boardLoading && tasks.length === 0 ? (
         <BoardSkeleton />
       ) : !selectedProjectId ? (
@@ -312,6 +355,16 @@ export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProject
             Create First Project
           </Button>
         </div>
+      ) : activeView === 'GRAPH' ? (
+        <DependencyGraphView
+          projectId={selectedProjectId}
+          onNavigateToKanban={(taskId) => {
+            setActiveView('KANBAN');
+            const found = tasks.find((t) => t.id === taskId);
+            if (found) setEditingTask(found);
+          }}
+          onCreateTask={() => setIsCreateTaskOpen(true)}
+        />
       ) : (
         <KanbanBoard
           tasks={filteredTasks}

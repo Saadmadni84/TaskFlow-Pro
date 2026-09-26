@@ -638,9 +638,19 @@ frontend/
 │   └── useProjectBoard.ts           # State orchestration, optimistic rollback, server reconciliation
 ├── lib/
 │   ├── api/                         # Typed domain API client modules
-│   │   ├── client.ts, projects.ts, tasks.ts, dependencies.ts, scheduling.ts, ai.ts, criticalPath.ts
+│   │   ├── client.ts, projects.ts, tasks.ts, dependencies.ts, scheduling.ts, ai.ts, criticalPath.ts, dependencyGraph.ts
 │   └── utils/
 │       └── dates.ts                 # Timezone-safe calendar date arithmetic and formatting
+├── components/
+│   ├── graph/
+│   │   ├── DependencyGraphView.tsx  # Interactive ReactFlow canvas with Dagre auto-layout
+│   │   ├── GraphTaskNode.tsx        # Compact status & readiness node card
+│   │   ├── GraphDetailDrawer.tsx    # Slide-out inspector with upstream/downstream lists
+│   │   └── GraphEmptyState.tsx      # Guidance for zero tasks or zero dependencies
+├── hooks/
+│   ├── useDependencyGraph.ts        # Dagre layout, highlight calculation, mutation refresh
+│   ├── useProjects.ts               # Project listing and selection
+│   └── useProjectBoard.ts           # State orchestration, optimistic rollback, server reconciliation
 └── types/
     └── index.ts                     # TypeScript domain contracts strictly matching Spring DTOs
 ```
@@ -654,6 +664,15 @@ frontend/
 5. **Interactive Dependency Manager**: Search and add project prerequisites, remove prerequisites, with real-time cycle detection feedback (`Dependency not added. This dependency would create a cycle in the workflow.`).
 6. **AI Dependency Suggestions**: Grounded LLM proposals showing confidence percentage and domain reasoning with explicit human review (`[Accept]` / `[Dismiss]`) and graceful degradation if AI is unavailable.
 7. **Critical Path Bottleneck Viewer**: Exposes project completion date, critical tasks (0 slack), float distribution, and renders all parallel critical paths.
+8. **Interactive Visual DAG Graph**: Dedicated visual representation of project tasks and directed dependency edges powered by `@xyflow/react` and `@dagrejs/dagre`:
+   - Directed edges with arrows enforcing `predecessor ───────▶ successor` semantics.
+   - Dual layout modes: Left-to-Right (LR) workflow and Top-to-Bottom (TB) hierarchy.
+   - Node selection with selective highlight modes: direct prerequisites/dependents or complete ancestor/descendant chains.
+   - Interactive slide-out task inspector with direct dependency removal and quick Kanban navigation.
+   - Graph controls: Zoom In/Out, Fit-to-Screen, Reset View, Layout Orientation, and Highlight Chain mode.
+   - Accessible structured textual alternative view for screen readers and compact tabular review.
+   - Live cycle rejection feedback without orphaned edges.
+   - Dual-view workspace toggle (`Kanban Board` ⇄ `Visual DAG Graph`) and dedicated `/graph` route.
 
 ---
 
@@ -666,6 +685,8 @@ Create Task
     ↓
 Add Dependencies (Prerequisites / Dependents)
     ↓ (Server validates DAG, rejects cycles, calculates initial schedule)
+Visual DAG Inspection (Inspect topological structure, converging paths, and dependency chains)
+    ↓
 Move Through Kanban (Backlog → In Progress → Review → Done)
     ↓ (Optimistic move with server reconciliation & rollback on error)
 Dependency State Updates (Upstream Done unlocks downstream Ready; Reopen blocks successors)
@@ -684,14 +705,14 @@ AI Dependency Suggestions (Semantic suggestions reviewed and explicitly accepted
 ## Testing
 
 ### Backend Tests
-Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, Critical Path Analysis tests, optimistic locking concurrency tests, transactional rollback tests, preview-commit consistency tests, and Golden Scenario E2E integration tests (172 tests):
+Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, Critical Path Analysis tests, optimistic locking concurrency tests, transactional rollback tests, preview-commit consistency tests, Golden Scenario E2E integration tests, and Dependency Graph query service / REST controller tests (178 tests):
 ```bash
 cd backend
 ./mvnw test
 ```
 
 ### Frontend Tests
-Runs comprehensive component and hook tests with Vitest and React Testing Library (20 tests across 8 suites):
+Runs comprehensive component and hook tests with Vitest and React Testing Library (27 tests across 10 suites):
 ```bash
 cd frontend
 npm test
@@ -775,6 +796,7 @@ docker compose up --build
 - [x] **Phase 8**: Critical Path Analysis Engine (pure deterministic CPM calculation, forward/backward pass, total slack calculation, critical task identification, bounded multi-path reconstruction, read-only REST API `GET /api/projects/{projectId}/critical-path`, inclusive calendar date arithmetic, and comprehensive test suite).
 - [x] **Phase 9**: Production Kanban Frontend and Workflow UI (responsive 4-column Kanban board, authoritative readiness and schedule display, accessible card actions, optimistic UI with server rollback, schedule impact preview intercept modal, dependency management with cycle error reporting, AI suggestion review with explicit acceptance, and multi-path critical path analysis modal).
 - [x] **Phase 10**: Production Hardening, Security, E2E Validation & Deployment Readiness (HTTP security headers, correlation ID request tracing, sliding-window AI rate limiting, input boundary constraints, optimistic locking concurrency protection, atomic rollback guarantees, preview/commit consistency verification, Golden Scenario E2E test, deterministic seed demo migration, multi-stage production Dockerfiles, Actuator health probes, and full Docker Compose orchestration).
+- [x] **Functional Completion & Visual DAG**: Dedicated Visual DAG representation powered by `@xyflow/react` and `@dagrejs/dagre`, backend `GET /api/projects/{projectId}/dependency-graph` query endpoint, predecessor → successor arrow semantics, Dagre layout engine, node selection & chain highlighting, slide-out inspector, cycle rejection error messaging, accessible list alternative, responsive canvas controls, and dual-view workspace switching.
 
 
 
