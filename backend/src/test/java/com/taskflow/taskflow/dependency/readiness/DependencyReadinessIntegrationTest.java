@@ -20,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 class DependencyReadinessIntegrationTest {
@@ -328,5 +329,35 @@ class DependencyReadinessIntegrationTest {
                         .isEqualTo(DependencyStatus.BLOCKED);
             }
         }
+    }
+
+    @Test
+    @DisplayName("Should reject transition to DONE when task is BLOCKED by incomplete prerequisites")
+    void shouldRejectDoneTransitionWhenBlocked() {
+        Task taskA = createTask("Task A", TaskStatus.IN_PROGRESS);
+        Task taskB = createTask("Task B", TaskStatus.BACKLOG);
+        link(taskA, taskB);
+
+        assertThat(reload(taskB).getDependencyStatus()).isEqualTo(DependencyStatus.BLOCKED);
+
+        // Attempting to complete Task B while Task A is IN_PROGRESS must fail with 409 / BlockedTaskCompletionException
+        assertThatThrownBy(() -> taskService.updateTask(taskB.getId(),
+                new UpdateTaskRequest("Task B", "Desc", TaskStatus.DONE, null, null, null)))
+                .isInstanceOf(com.taskflow.taskflow.common.exception.BlockedTaskCompletionException.class)
+                .hasMessageContaining("Cannot mark task 'Task B' as DONE: task is BLOCKED");
+
+        // Verify Task B remained BACKLOG and BLOCKED
+        assertThat(reload(taskB).getWorkflowStatus()).isEqualTo(TaskStatus.BACKLOG);
+        assertThat(reload(taskB).getDependencyStatus()).isEqualTo(DependencyStatus.BLOCKED);
+
+        // Now complete Task A -> Task B automatically becomes READY
+        taskService.updateTask(taskA.getId(),
+                new UpdateTaskRequest("Task A", "Desc", TaskStatus.DONE, null, null, null));
+        assertThat(reload(taskB).getDependencyStatus()).isEqualTo(DependencyStatus.READY);
+
+        // Now completing Task B succeeds
+        taskService.updateTask(taskB.getId(),
+                new UpdateTaskRequest("Task B", "Desc", TaskStatus.DONE, null, null, null));
+        assertThat(reload(taskB).getWorkflowStatus()).isEqualTo(TaskStatus.DONE);
     }
 }

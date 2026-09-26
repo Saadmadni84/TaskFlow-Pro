@@ -76,12 +76,12 @@ describe('TaskCard', () => {
     expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
   });
 
-  it('provides accessible Move to... options in the compact menu', () => {
+  it('disables Move to Done for BLOCKED task and allows for READY task in menu', () => {
     const onMoveToStatus = vi.fn();
-    render(
+    const { rerender } = render(
       <TaskCard
         task={mockTask}
-        prerequisiteCount={0}
+        prerequisiteCount={2}
         dependentCount={0}
         onEdit={vi.fn()}
         onOpenDependencies={vi.fn()}
@@ -95,11 +95,32 @@ describe('TaskCard', () => {
     const menuBtn = screen.getByLabelText(/Actions for Implement Payment Gateway/);
     fireEvent.click(menuBtn);
 
-    // Verify accessible move actions exist
-    const moveToDone = screen.getByText('→ Done');
-    expect(moveToDone).toBeInTheDocument();
+    // Verify move to done is disabled when BLOCKED
+    const blockedDoneBtn = screen.getByRole('button', { name: /→ Done/i });
+    expect(blockedDoneBtn).toBeDisabled();
+    fireEvent.click(blockedDoneBtn);
+    expect(onMoveToStatus).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(moveToDone);
+  it('allows Move to Done for READY task in menu', () => {
+    const onMoveToStatus = vi.fn();
+    render(
+      <TaskCard
+        task={{ ...mockTask, dependencyStatus: 'READY' }}
+        prerequisiteCount={0}
+        dependentCount={0}
+        onEdit={vi.fn()}
+        onOpenDependencies={vi.fn()}
+        onOpenAiSuggestions={vi.fn()}
+        onDelete={vi.fn()}
+        onMoveToStatus={onMoveToStatus}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText(/Actions for Implement Payment Gateway/));
+    const activeDoneBtn = screen.getByRole('button', { name: /→ Done/i });
+    expect(activeDoneBtn).not.toBeDisabled();
+    fireEvent.click(activeDoneBtn);
     expect(onMoveToStatus).toHaveBeenCalledWith('t-1', 'DONE');
   });
 });

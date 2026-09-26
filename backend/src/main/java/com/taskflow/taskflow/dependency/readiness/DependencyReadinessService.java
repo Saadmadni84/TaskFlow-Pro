@@ -1,5 +1,6 @@
 package com.taskflow.taskflow.dependency.readiness;
 
+import com.taskflow.taskflow.common.exception.BlockedTaskCompletionException;
 import com.taskflow.taskflow.common.exception.ProjectNotFoundException;
 import com.taskflow.taskflow.common.exception.TaskNotFoundException;
 import com.taskflow.taskflow.common.metrics.TaskFlowMetrics;
@@ -66,6 +67,44 @@ public class DependencyReadinessService {
             TopologicalSortService topologicalSortService
     ) {
         this(taskRepository, projectRepository, graphBuilder, traversalService, topologicalSortService, new TaskFlowMetrics(null));
+    }
+
+    /**
+     * Validates whether a task is permitted to transition to DONE.
+     * All direct predecessors must have workflowStatus == DONE.
+     * Throws BlockedTaskCompletionException if the task is BLOCKED or any predecessor is not DONE.
+     */
+    public void validateCanTransitionToDone(Task task) {
+        if (task.getDependencyStatus() == DependencyStatus.BLOCKED || !arePrerequisitesSatisfied(task)) {
+            log.warn("operation=TASK_COMPLETE_BLOCKED_REJECTED taskId={} projectId={} dependencyStatus={}",
+                    task.getId(), task.getProject().getId(), task.getDependencyStatus());
+            throw new BlockedTaskCompletionException(
+                    "Cannot mark task '" + task.getTitle() + "' as DONE: task is BLOCKED because one or more prerequisite dependencies are not DONE."
+            );
+        }
+    }
+
+    /**
+     * Checks if all direct predecessors of the given task have workflowStatus == DONE.
+     */
+    public boolean arePrerequisitesSatisfied(Task task) {
+        UUID projectId = task.getProject().getId();
+        DependencyGraph graph = graphBuilder.buildGraphForProject(projectId);
+        Set<UUID> predecessorIds = graph.getPredecessors(task.getId());
+        if (predecessorIds.isEmpty()) {
+            return true;
+        }
+
+        Map<UUID, Task> taskMap = taskRepository.findByProjectId(projectId).stream()
+                .collect(Collectors.toMap(Task::getId, Function.identity()));
+
+        for (UUID predId : predecessorIds) {
+            Task pred = taskMap.get(predId);
+            if (pred == null || pred.getWorkflowStatus() != TaskStatus.DONE) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

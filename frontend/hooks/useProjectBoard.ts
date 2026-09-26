@@ -114,7 +114,9 @@ export function useProjectBoard(projectId: string | null) {
       // 4. Rollback UI on failure
       setTasks(originalTasks);
       if (err instanceof ApiClientError) {
-        if (err.status === 409 || err.code === 'CONCURRENCY_CONFLICT') {
+        if (err.code === 'TASK_BLOCKED' || err.message?.includes('BLOCKED') || err.message?.includes('prerequisite')) {
+          setActionError(err.message || 'Cannot mark task as DONE: Prerequisites must be completed first.');
+        } else if (err.status === 409 || err.code === 'CONCURRENCY_CONFLICT') {
           setActionError('This task was updated elsewhere. Refresh to load the latest version.');
         } else {
           setActionError(err.message || 'Unable to update task. The server rejected the change. Your board has been restored.');

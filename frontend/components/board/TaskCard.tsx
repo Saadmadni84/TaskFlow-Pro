@@ -175,17 +175,30 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               </div>
               {ALL_STATUSES.map(({ status, label }) => {
                 if (status === task.workflowStatus) return null;
+                const isBlockedDone = isBlocked && status === 'DONE';
                 return (
                   <button
                     key={status}
                     type="button"
+                    disabled={isBlockedDone}
                     onClick={() => {
+                      if (isBlockedDone) return;
                       setMenuOpen(false);
                       onMoveToStatus(task.id, status);
                     }}
-                    className="w-full text-left px-3 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 pl-4"
+                    title={isBlockedDone ? 'Cannot move to Done: Prerequisites must be completed first' : undefined}
+                    className={`w-full text-left px-3 py-1 pl-4 flex items-center justify-between text-xs transition-colors ${
+                      isBlockedDone
+                        ? 'text-zinc-600 cursor-not-allowed opacity-60'
+                        : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                    }`}
                   >
-                    → {label}
+                    <span>→ {label}</span>
+                    {isBlockedDone && (
+                      <span className="text-[9px] font-mono text-rose-500 uppercase tracking-tight">
+                        Blocked
+                      </span>
+                    )}
                   </button>
                 );
               })}

@@ -227,8 +227,16 @@ export const TaskEditDialog: React.FC<TaskEditDialogProps> = ({
               <option value="BACKLOG">Backlog</option>
               <option value="IN_PROGRESS">In Progress</option>
               <option value="REVIEW">Review</option>
-              <option value="DONE">Done</option>
+              <option value="DONE" disabled={task.dependencyStatus === 'BLOCKED'}>
+                Done {task.dependencyStatus === 'BLOCKED' ? '(Blocked — Prerequisites incomplete)' : ''}
+              </option>
             </select>
+            {task.dependencyStatus === 'BLOCKED' && (
+              <p className="text-[11px] text-rose-400 mt-1 flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
+                <span>Prerequisites must be completed before marking this task as DONE.</span>
+              </p>
+            )}
           </div>
 
           <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-end gap-2">

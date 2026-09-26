@@ -115,6 +115,9 @@ public class TaskService {
         boolean statusChanged = (newStatus != null && newStatus != oldStatus);
 
         if (statusChanged) {
+            if (newStatus == TaskStatus.DONE) {
+                readinessService.validateCanTransitionToDone(task);
+            }
             task.setWorkflowStatus(newStatus);
             boolean wasDone = (oldStatus == TaskStatus.DONE);
             boolean isDone = (newStatus == TaskStatus.DONE);

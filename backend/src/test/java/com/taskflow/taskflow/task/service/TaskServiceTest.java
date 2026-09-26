@@ -86,7 +86,24 @@ class TaskServiceTest {
         TaskResponse response = taskService.updateTask(task.getId(), request);
 
         assertThat(response.workflowStatus()).isEqualTo(TaskStatus.DONE);
+        verify(readinessService).validateCanTransitionToDone(task);
         verify(readinessService).recalculateAffectedDescendants(task.getId());
+    }
+
+    @Test
+    @DisplayName("Should throw BlockedTaskCompletionException when attempting to transition BLOCKED task to DONE")
+    void shouldRejectTransitionToDoneWhenBlocked() {
+        when(taskRepository.findById(task.getId())).thenReturn(Optional.of(task));
+        org.mockito.Mockito.doThrow(new com.taskflow.taskflow.common.exception.BlockedTaskCompletionException("Task is BLOCKED"))
+                .when(readinessService).validateCanTransitionToDone(task);
+
+        UpdateTaskRequest request = new UpdateTaskRequest("New Title", "New Desc", TaskStatus.DONE, null, null, null);
+
+        assertThatThrownBy(() -> taskService.updateTask(task.getId(), request))
+                .isInstanceOf(com.taskflow.taskflow.common.exception.BlockedTaskCompletionException.class)
+                .hasMessageContaining("Task is BLOCKED");
+
+        verify(readinessService, never()).recalculateAffectedDescendants(any());
     }
 
     @Test
