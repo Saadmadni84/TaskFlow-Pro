@@ -29,8 +29,81 @@ TaskFlow Pro is structured as a modular monolith:
 ```
 
 - **Frontend (`/frontend`)**: Next.js 14, React, TypeScript, and Tailwind CSS. Focuses purely on visual state representation, user interaction, and dispatching commands to the backend.
-- **Backend (`/backend`)**: Java 21, Spring Boot 3, and Spring Data JPA. Organized in domain-oriented packages (`common`, `task`, `dependency`, `scheduling`, `criticalpath`, `ai`).
+- **Backend (`/backend`)**: Java 21, Spring Boot 3, and Spring Data JPA. Organized in domain-oriented packages (`common`, `project`, `task`, `dependency`, `scheduling`, `criticalpath`, `ai`).
 - **Database (`docker-compose.yml`)**: PostgreSQL 16 containerized with Flyway schema migration management.
+
+## Domain Model
+
+TaskFlow Pro organizes work in projects, tasks, and directed dependency edges:
+
+```text
+Project
+   |
+   └── Tasks
+          |
+          └── Task Dependencies
+                  |
+                  └── predecessor → successor
+```
+
+### Invariant & Status Separation
+
+A fundamental rule of TaskFlow Pro is separating user workflow progression from topological readiness:
+
+```text
+Workflow Status (User-controlled column placement)
+--------------------------------------------------
+BACKLOG
+IN_PROGRESS
+REVIEW
+DONE
+
+Dependency Status (System-derived readiness state)
+--------------------------------------------------
+READY
+BLOCKED
+```
+
+> **Important**: Dependency status (`READY` / `BLOCKED`) is strictly **derived from prerequisite task completion in the DAG**. It is not a user-controlled Kanban status. A task can be `IN_PROGRESS + BLOCKED` or `BACKLOG + READY`.
+
+### Entity-Relationship Diagram
+
+```mermaid
+erDiagram
+    PROJECT ||--o{ TASK : contains
+    TASK ||--o{ TASK_DEPENDENCY : predecessor
+    TASK ||--o{ TASK_DEPENDENCY : successor
+
+    PROJECT {
+        uuid id PK
+        string name
+        string description
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    TASK {
+        uuid id PK
+        uuid project_id FK
+        string title
+        text description
+        string workflow_status
+        string dependency_status
+        date start_date
+        date due_date
+        integer duration_days
+        bigint version
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    TASK_DEPENDENCY {
+        uuid id PK
+        uuid predecessor_task_id FK
+        uuid successor_task_id FK
+        timestamp created_at
+    }
+```
 
 ## Technology Stack
 
@@ -195,18 +268,11 @@ npm run build
 
 ## Future Modules
 
-### Implemented (Phase 1)
-- [x] Monorepo structure and directory conventions
-- [x] Spring Boot 3 modular monolith foundation with Java 21
-- [x] Global structured JSON error handling and HTTP status mapping
-- [x] PostgreSQL 16 containerization with Docker Compose and healthcheck
-- [x] Flyway migration infrastructure with initial baseline
-- [x] Real database connection integration testing
-- [x] Next.js 14 TypeScript application shell with dark theme and semantic design system
-- [x] Typed API client isolation layer
+### Implemented (Phase 1 & Phase 2)
+- [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
+- [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
 
 ### Planned (Upcoming Phases)
-- [ ] **Phase 2**: Task & Dependency domain models, PostgreSQL relational schema, cycle detection, and readiness state calculation
-- [ ] **Phase 3**: Downstream schedule propagation engine and interactive four-column Kanban board with `dnd-kit`
-- [ ] **Phase 4**: Critical path analysis and schedule float calculation
-- [ ] **Phase 5**: AI-assisted dependency suggestion engine with human approval workflow
+- [ ] **Phase 3**: Deterministic DAG Engine (self-dependency validation, cycle detection, topological sorting, affected subgraph calculation, and derived readiness engine)
+- [ ] **Phase 4**: Downstream schedule propagation engine (non-compounding shift calculation) and critical path analysis
+- [ ] **Phase 5**: Interactive four-column Kanban board with `dnd-kit` and human-in-the-loop AI dependency suggestions

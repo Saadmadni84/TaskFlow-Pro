@@ -1,0 +1,137 @@
+package com.taskflow.taskflow.dependency.service;
+
+import com.taskflow.taskflow.common.exception.DuplicateDependencyException;
+import com.taskflow.taskflow.common.exception.InvalidDependencyException;
+import com.taskflow.taskflow.common.exception.TaskNotFoundException;
+import com.taskflow.taskflow.dependency.dto.CreateDependencyRequest;
+import com.taskflow.taskflow.dependency.dto.DependencyResponse;
+import com.taskflow.taskflow.dependency.entity.TaskDependency;
+import com.taskflow.taskflow.dependency.repository.TaskDependencyRepository;
+import com.taskflow.taskflow.project.entity.Project;
+import com.taskflow.taskflow.task.entity.Task;
+import com.taskflow.taskflow.task.entity.TaskStatus;
+import com.taskflow.taskflow.task.repository.TaskRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class TaskDependencyServiceTest {
+
+    @Mock
+    private TaskDependencyRepository dependencyRepository;
+
+    @Mock
+    private TaskRepository taskRepository;
+
+    @InjectMocks
+    private TaskDependencyService dependencyService;
+
+    private Project projectA;
+    private Project projectB;
+    private Task taskA;
+    private Task taskB;
+    private Task taskInProjectB;
+
+    @BeforeEach
+    void setUp() {
+        projectA = new Project(UUID.randomUUID(), "Project A", "First workspace");
+        projectB = new Project(UUID.randomUUID(), "Project B", "Second workspace");
+
+        taskA = new Task(UUID.randomUUID(), projectA, "Task A", "Predecessor", TaskStatus.DONE, null, null, null, null);
+        taskB = new Task(UUID.randomUUID(), projectA, "Task B", "Successor", TaskStatus.BACKLOG, null, null, null, null);
+        taskInProjectB = new Task(UUID.randomUUID(), projectB, "Task in B", "Alien task", TaskStatus.BACKLOG, null, null, null, null);
+    }
+
+    @Test
+    @DisplayName("Should create dependency when tasks exist in same project and are not duplicates")
+    void shouldCreateDependencySuccessfully() {
+        CreateDependencyRequest request = new CreateDependencyRequest(taskA.getId(), taskB.getId());
+
+        when(taskRepository.findById(taskA.getId())).thenReturn(Optional.of(taskA));
+        when(taskRepository.findById(taskB.getId())).thenReturn(Optional.of(taskB));
+        when(dependencyRepository.existsByPredecessorIdAndSuccessorId(taskA.getId(), taskB.getId())).thenReturn(false);
+
+        TaskDependency savedDependency = new TaskDependency(UUID.randomUUID(), taskA, taskB);
+        when(dependencyRepository.save(any(TaskDependency.class))).thenReturn(savedDependency);
+
+        DependencyResponse response = dependencyService.createDependency(request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.predecessorTaskId()).isEqualTo(taskA.getId());
+        assertThat(response.successorTaskId()).isEqualTo(taskB.getId());
+        verify(dependencyRepository).save(any(TaskDependency.class));
+    }
+
+    @Test
+    @DisplayName("Should reject self-dependency")
+    void shouldRejectSelfDependency() {
+        CreateDependencyRequest request = new CreateDependencyRequest(taskA.getId(), taskA.getId());
+
+        assertThatThrownBy(() -> dependencyService.createDependency(request))
+                .isInstanceOf(InvalidDependencyException.class)
+                .hasMessageContaining("Self-dependency is forbidden");
+
+        verify(dependencyRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Should reject missing predecessor task")
+    void shouldRejectMissingPredecessorTask() {
+        UUID unknownId = UUID.randomUUID();
+        CreateDependencyRequest request = new CreateDependencyRequest(unknownId, taskB.getId());
+
+        when(taskRepository.findById(unknownId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> dependencyService.createDependency(request))
+                .isInstanceOf(TaskNotFoundException.class)
+                .hasMessageContaining(unknownId.toString());
+
+        verify(dependencyRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Should reject cross-project dependency (project isolation invariant)")
+    void shouldRejectCrossProjectDependency() {
+        CreateDependencyRequest request = new CreateDependencyRequest(taskA.getId(), taskInProjectB.getId());
+
+        when(taskRepository.findById(taskA.getId())).thenReturn(Optional.of(taskA));
+        when(taskRepository.findById(taskInProjectB.getId())).thenReturn(Optional.of(taskInProjectB));
+
+        assertThatThrownBy(() -> dependencyService.createDependency(request))
+                .isInstanceOf(InvalidDependencyException.class)
+                .hasMessageContaining("Cross-project dependencies are forbidden");
+
+        verify(dependencyRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Should reject duplicate dependency edge")
+    void shouldRejectDuplicateDependency() {
+        CreateDependencyRequest request = new CreateDependencyRequest(taskA.getId(), taskB.getId());
+
+        when(taskRepository.findById(taskA.getId())).thenReturn(Optional.of(taskA));
+        when(taskRepository.findById(taskB.getId())).thenReturn(Optional.of(taskB));
+        when(dependencyRepository.existsByPredecessorIdAndSuccessorId(taskA.getId(), taskB.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> dependencyService.createDependency(request))
+                .isInstanceOf(DuplicateDependencyException.class)
+                .hasMessageContaining("already exists");
+
+        verify(dependencyRepository, never()).save(any());
+    }
+}

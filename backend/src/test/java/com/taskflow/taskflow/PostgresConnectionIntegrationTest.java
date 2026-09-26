@@ -27,6 +27,15 @@ class PostgresConnectionIntegrationTest {
             assertThat(connection.isValid(2)).isTrue();
             assertThat(rs.next()).isTrue();
             assertThat(rs.getInt(1)).isGreaterThanOrEqualTo(1);
+
+            try (ResultSet rsTables = statement.executeQuery(
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")) {
+                java.util.List<String> tables = new java.util.ArrayList<>();
+                while (rsTables.next()) {
+                    tables.add(rsTables.getString(1).toLowerCase());
+                }
+                assertThat(tables).contains("projects", "tasks", "task_dependencies");
+            }
         }
     }
 }
