@@ -16,6 +16,7 @@ import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -44,6 +45,15 @@ public class Task {
     @Enumerated(EnumType.STRING)
     @Column(name = "dependency_status", nullable = false, length = 32)
     private DependencyStatus dependencyStatus;
+
+    @Column(name = "planned_start_date")
+    private LocalDate plannedStartDate;
+
+    @Column(name = "scheduled_start_date")
+    private LocalDate scheduledStartDate;
+
+    @Column(name = "scheduled_due_date")
+    private LocalDate scheduledDueDate;
 
     @Column(name = "start_date")
     private LocalDate startDate;
@@ -134,6 +144,9 @@ public class Task {
         if (startDate != null && dueDate != null && startDate.isAfter(dueDate)) {
             throw new IllegalArgumentException("Start date (" + startDate + ") cannot be after due date (" + dueDate + ")");
         }
+        if (scheduledStartDate != null && scheduledDueDate != null && scheduledStartDate.isAfter(scheduledDueDate)) {
+            throw new IllegalArgumentException("Scheduled start date (" + scheduledStartDate + ") cannot be after scheduled due date (" + scheduledDueDate + ")");
+        }
         if (durationDays != null && durationDays < 0) {
             throw new IllegalArgumentException("Duration days cannot be negative: " + durationDays);
         }
@@ -149,9 +162,63 @@ public class Task {
         if (durationDays != null && durationDays < 0) {
             throw new IllegalArgumentException("Duration days cannot be negative: " + durationDays);
         }
-        this.startDate = startDate;
-        this.dueDate = dueDate;
-        this.durationDays = durationDays;
+
+        if (startDate != null) {
+            this.plannedStartDate = startDate;
+            if (durationDays != null && durationDays > 0) {
+                this.durationDays = durationDays;
+            } else if (dueDate != null) {
+                this.durationDays = (int) ChronoUnit.DAYS.between(startDate, dueDate) + 1;
+            } else {
+                this.durationDays = 1;
+            }
+            this.scheduledStartDate = startDate;
+            this.scheduledDueDate = dueDate != null ? dueDate : startDate.plusDays(this.durationDays - 1);
+            this.startDate = this.scheduledStartDate;
+            this.dueDate = this.scheduledDueDate;
+        } else {
+            this.plannedStartDate = null;
+            this.scheduledStartDate = null;
+            this.scheduledDueDate = null;
+            this.startDate = null;
+            this.dueDate = dueDate;
+            this.durationDays = durationDays;
+        }
+    }
+
+    /**
+     * Updates the user's independent planned schedule.
+     */
+    public void setPlannedSchedule(LocalDate plannedStartDate, Integer durationDays) {
+        if (durationDays != null && durationDays < 1) {
+            throw new IllegalArgumentException("Duration days must be at least 1, but was: " + durationDays);
+        }
+        this.plannedStartDate = plannedStartDate;
+        if (durationDays != null) {
+            this.durationDays = durationDays;
+        } else if (this.durationDays == null || this.durationDays < 1) {
+            this.durationDays = 1;
+        }
+
+        if (this.plannedStartDate != null) {
+            this.scheduledStartDate = this.plannedStartDate;
+            this.scheduledDueDate = this.plannedStartDate.plusDays(this.durationDays - 1);
+            this.startDate = this.scheduledStartDate;
+            this.dueDate = this.scheduledDueDate;
+        }
+    }
+
+    /**
+     * Updates the calculated scheduled dates from the dependency-aware scheduling engine.
+     */
+    public void setScheduledDates(LocalDate scheduledStartDate, LocalDate scheduledDueDate) {
+        if (scheduledStartDate != null && scheduledDueDate != null && scheduledStartDate.isAfter(scheduledDueDate)) {
+            throw new IllegalArgumentException("Scheduled start date (" + scheduledStartDate + ") cannot be after scheduled due date (" + scheduledDueDate + ")");
+        }
+        this.scheduledStartDate = scheduledStartDate;
+        this.scheduledDueDate = scheduledDueDate;
+        this.startDate = scheduledStartDate;
+        this.dueDate = scheduledDueDate;
     }
 
     public UUID getId() {
@@ -197,24 +264,50 @@ public class Task {
         return dependencyStatus;
     }
 
-    /**
-     * Package-private or engine-level setter. Dependency status is derived by the DAG engine,
-     * not client-controlled.
-     */
     public void setDependencyStatus(DependencyStatus dependencyStatus) {
         this.dependencyStatus = Objects.requireNonNull(dependencyStatus, "Dependency status must not be null");
     }
 
+    public LocalDate getPlannedStartDate() {
+        return plannedStartDate;
+    }
+
+    public void setPlannedStartDate(LocalDate plannedStartDate) {
+        this.plannedStartDate = plannedStartDate;
+    }
+
+    public LocalDate getScheduledStartDate() {
+        return scheduledStartDate;
+    }
+
+    public void setScheduledStartDate(LocalDate scheduledStartDate) {
+        this.scheduledStartDate = scheduledStartDate;
+        this.startDate = scheduledStartDate;
+    }
+
+    public LocalDate getScheduledDueDate() {
+        return scheduledDueDate;
+    }
+
+    public void setScheduledDueDate(LocalDate scheduledDueDate) {
+        this.scheduledDueDate = scheduledDueDate;
+        this.dueDate = scheduledDueDate;
+    }
+
     public LocalDate getStartDate() {
-        return startDate;
+        return startDate != null ? startDate : scheduledStartDate;
     }
 
     public LocalDate getDueDate() {
-        return dueDate;
+        return dueDate != null ? dueDate : scheduledDueDate;
     }
 
     public Integer getDurationDays() {
         return durationDays;
+    }
+
+    public void setDurationDays(Integer durationDays) {
+        this.durationDays = durationDays;
     }
 
     public Long getVersion() {

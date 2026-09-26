@@ -16,6 +16,7 @@ import com.taskflow.taskflow.dependency.graph.DependencyGraphBuilder;
 import com.taskflow.taskflow.dependency.graph.GraphTraversalService;
 import com.taskflow.taskflow.dependency.readiness.DependencyReadinessService;
 import com.taskflow.taskflow.dependency.repository.TaskDependencyRepository;
+import com.taskflow.taskflow.scheduling.service.SchedulingService;
 import com.taskflow.taskflow.task.entity.Task;
 import com.taskflow.taskflow.task.repository.TaskRepository;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ public class TaskDependencyService {
     private final CycleDetectionService cycleDetectionService;
     private final GraphTraversalService traversalService;
     private final DependencyReadinessService readinessService;
+    private final SchedulingService schedulingService;
 
     public TaskDependencyService(
             TaskDependencyRepository dependencyRepository,
@@ -42,7 +44,8 @@ public class TaskDependencyService {
             DependencyGraphBuilder graphBuilder,
             CycleDetectionService cycleDetectionService,
             GraphTraversalService traversalService,
-            DependencyReadinessService readinessService
+            DependencyReadinessService readinessService,
+            SchedulingService schedulingService
     ) {
         this.dependencyRepository = dependencyRepository;
         this.taskRepository = taskRepository;
@@ -50,6 +53,7 @@ public class TaskDependencyService {
         this.cycleDetectionService = cycleDetectionService;
         this.traversalService = traversalService;
         this.readinessService = readinessService;
+        this.schedulingService = schedulingService;
     }
 
     /**
@@ -63,8 +67,8 @@ public class TaskDependencyService {
      * 4. Duplicate edge rejection
      * 5. Cycle detection: does adding predecessor -> successor close a cycle?
      *
-     * After persisting the edge, immediately recalculates readiness for the successor
-     * and any of its downstream descendants.
+     * After persisting the edge, immediately recalculates readiness and schedule
+     * for the successor and any of its downstream descendants.
      */
     @Transactional
     public DependencyResponse createDependency(CreateDependencyRequest request) {
@@ -117,8 +121,11 @@ public class TaskDependencyService {
         TaskDependency dependency = new TaskDependency(predecessor, successor);
         TaskDependency saved = dependencyRepository.saveAndFlush(dependency);
 
-        // Recalculate readiness for successor and any downstream descendants
+        // Recalculate readiness for successor and any downstream descendants (Phase 4)
         readinessService.recalculateTaskAndDescendants(successorId);
+
+        // Recalculate schedule for successor and any downstream descendants (Phase 5)
+        schedulingService.recalculateTaskAndDescendants(successorId);
 
         return DependencyMapper.toResponse(saved);
     }
@@ -153,8 +160,8 @@ public class TaskDependencyService {
     }
 
     /**
-     * Removes an existing dependency edge and recalculates readiness for the successor
-     * and any of its downstream descendants.
+     * Removes an existing dependency edge and recalculates readiness and schedule
+     * for the successor and any of its downstream descendants.
      */
     @Transactional
     public void deleteDependency(UUID predecessorTaskId, UUID successorTaskId) {
@@ -164,7 +171,10 @@ public class TaskDependencyService {
         dependencyRepository.deleteByPredecessorIdAndSuccessorId(predecessorTaskId, successorTaskId);
         dependencyRepository.flush();
 
-        // Recalculate readiness for successor after prerequisite removal
+        // Recalculate readiness for successor after prerequisite removal (Phase 4)
         readinessService.recalculateTaskAndDescendants(successorTaskId);
+
+        // Recalculate schedule for successor after prerequisite removal (Phase 5)
+        schedulingService.recalculateTaskAndDescendants(successorTaskId);
     }
 }

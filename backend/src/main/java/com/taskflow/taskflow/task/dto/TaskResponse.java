@@ -14,10 +14,32 @@ public record TaskResponse(
         String description,
         TaskStatus workflowStatus,
         DependencyStatus dependencyStatus,
+        LocalDate plannedStartDate,
+        LocalDate scheduledStartDate,
+        LocalDate scheduledDueDate,
         LocalDate startDate,
         LocalDate dueDate,
         Integer durationDays,
         Long version,
         Instant createdAt,
         Instant updatedAt
-) {}
+) {
+    // Backwards-compatible convenience constructor
+    public TaskResponse(
+            UUID id,
+            UUID projectId,
+            String title,
+            String description,
+            TaskStatus workflowStatus,
+            DependencyStatus dependencyStatus,
+            LocalDate startDate,
+            LocalDate dueDate,
+            Integer durationDays,
+            Long version,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this(id, projectId, title, description, workflowStatus, dependencyStatus,
+                startDate, startDate, dueDate, startDate, dueDate, durationDays, version, createdAt, updatedAt);
+    }
+}

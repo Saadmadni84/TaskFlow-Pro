@@ -58,6 +58,9 @@ class TaskDependencyServiceTest {
     @Mock
     private com.taskflow.taskflow.dependency.readiness.DependencyReadinessService readinessService;
 
+    @Mock
+    private com.taskflow.taskflow.scheduling.service.SchedulingService schedulingService;
+
     @InjectMocks
     private TaskDependencyService dependencyService;
 
@@ -100,6 +103,7 @@ class TaskDependencyServiceTest {
         assertThat(response.successorTaskId()).isEqualTo(taskB.getId());
         verify(dependencyRepository).saveAndFlush(any(TaskDependency.class));
         verify(readinessService).recalculateTaskAndDescendants(taskB.getId());
+        verify(schedulingService).recalculateTaskAndDescendants(taskB.getId());
     }
 
     @Test
@@ -112,6 +116,7 @@ class TaskDependencyServiceTest {
         verify(dependencyRepository).deleteByPredecessorIdAndSuccessorId(taskA.getId(), taskB.getId());
         verify(dependencyRepository).flush();
         verify(readinessService).recalculateTaskAndDescendants(taskB.getId());
+        verify(schedulingService).recalculateTaskAndDescendants(taskB.getId());
     }
 
     @Test

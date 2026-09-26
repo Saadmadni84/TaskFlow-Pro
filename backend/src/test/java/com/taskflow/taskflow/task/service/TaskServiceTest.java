@@ -5,6 +5,7 @@ import com.taskflow.taskflow.common.exception.TaskNotFoundException;
 import com.taskflow.taskflow.dependency.readiness.DependencyReadinessService;
 import com.taskflow.taskflow.project.entity.Project;
 import com.taskflow.taskflow.project.repository.ProjectRepository;
+import com.taskflow.taskflow.scheduling.service.SchedulingService;
 import com.taskflow.taskflow.task.dto.CreateTaskRequest;
 import com.taskflow.taskflow.task.dto.TaskResponse;
 import com.taskflow.taskflow.task.dto.UpdateTaskRequest;
@@ -20,13 +21,14 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,6 +44,9 @@ class TaskServiceTest {
 
     @Mock
     private DependencyReadinessService readinessService;
+
+    @Mock
+    private SchedulingService schedulingService;
 
     @InjectMocks
     private TaskService taskService;
@@ -108,6 +113,18 @@ class TaskServiceTest {
 
         assertThat(response.workflowStatus()).isEqualTo(TaskStatus.IN_PROGRESS);
         verify(readinessService, never()).recalculateAffectedDescendants(any());
+    }
+
+    @Test
+    @DisplayName("Should trigger schedulingService when planned start or duration changes")
+    void shouldTriggerSchedulingWhenDatesChange() {
+        when(taskRepository.findById(task.getId())).thenReturn(Optional.of(task));
+        LocalDate newStart = LocalDate.of(2026, 6, 1);
+
+        UpdateTaskRequest request = new UpdateTaskRequest("Title", "Desc", null, newStart, newStart, null, 5);
+        taskService.updateTask(task.getId(), request);
+
+        verify(schedulingService).updateTaskSchedule(eq(task), eq(newStart), eq(5));
     }
 
     @Test

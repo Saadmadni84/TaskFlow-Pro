@@ -25,10 +25,28 @@ public record CreateTaskRequest(
 
         TaskStatus workflowStatus,
 
+        LocalDate plannedStartDate,
+
         LocalDate startDate,
 
         LocalDate dueDate,
 
         @Min(value = 0, message = "Duration days cannot be negative")
         Integer durationDays
-) {}
+) {
+    public CreateTaskRequest(
+            UUID projectId,
+            String title,
+            String description,
+            TaskStatus workflowStatus,
+            LocalDate startDate,
+            LocalDate dueDate,
+            Integer durationDays
+    ) {
+        this(projectId, title, description, workflowStatus, startDate, startDate, dueDate, durationDays);
+    }
+
+    public LocalDate resolvePlannedStart() {
+        return plannedStartDate != null ? plannedStartDate : startDate;
+    }
+}

@@ -179,6 +179,53 @@ flowchart TD
    - Converging successors (e.g. $B \rightarrow D, C \rightarrow D$) are evaluated exactly once in topological order.
    - Only tasks whose `dependencyStatus` actually changes are updated and persisted, preventing database write churn and unnecessary optimistic-lock version increments.
 
+## Scheduling Engine
+
+TaskFlow Pro implements a deterministic, constraint-based scheduling engine that automatically propagates upstream date changes downstream through the DAG without compounding delays.
+
+### Date Semantics & Model
+
+1. **`plannedStartDate`**: The user's independent planned schedule baseline.
+2. **`durationDays`**: Number of inclusive calendar days occupied by the task ($durationDays \ge 1$). Duration is strictly preserved across all shifts.
+3. **`scheduledStartDate`**: The effective start date after applying all prerequisite dependency constraints.
+4. **`scheduledDueDate`**: The effective completion date calculated as:
+   $$\text{scheduledDueDate} = \text{scheduledStartDate} + \text{durationDays} - 1\text{ day}$$
+
+### The Scheduling Invariant
+
+For every directed dependency $P \rightarrow S$ ($P$ is predecessor, $S$ is successor):
+
+$$\text{successor.scheduledStartDate} \ge \max_{P \in \text{predecessors}} (P.\text{scheduledDueDate} + 1\text{ day})$$
+
+$$\text{successor.scheduledStartDate} \ge \text{successor.plannedStartDate}$$
+
+$$\text{successor.scheduledDueDate} = \text{successor.scheduledStartDate} + \text{successor.durationDays} - 1\text{ day}$$
+
+### Why Delays Do Not Compound (Converging Paths)
+
+In a diamond / converging dependency graph:
+
+```mermaid
+flowchart TD
+    A["Task A"] --> B["Task B"]
+    A --> C["Task C"]
+    B --> D["Task D"]
+    C --> D
+```
+
+Suppose task $A$ is delayed by $+3$ days:
+- Both $B$ and $C$ depend directly on $A$, so their scheduled dates shift by $+3$ days.
+- Successor $D$ depends on both $B$ and $C$.
+- Rather than summing delays ($+3$ from $B$ and $+3$ from $C = +6$), the engine computes the constraint:
+  $$D.\text{scheduledStartDate} = \max(D.\text{plannedStartDate}, B.\text{scheduledDueDate} + 1, C.\text{scheduledDueDate} + 1)$$
+- Since both $B$ and $C$ finish on the same shifted date, $\max(B.\text{due} + 1, C.\text{due} + 1)$ shifts $D$ by **exactly $+3$ days**, completely preventing compound delay accumulation.
+
+### Baseline Recomputability
+
+Because schedules are derived from:
+$$\text{plannedStartDate} + \text{current dependency constraints}$$
+if an upstream task $A$ is moved earlier, downstream successors can return to their independent baseline planned schedule without relying on historical delta records or accumulated state drift.
+
 ## Technology Stack
 
 ### Backend
@@ -342,12 +389,12 @@ npm run build
 
 ## Future Modules
 
-### Implemented (Phases 1 - 4)
+### Implemented (Phases 1 - 5)
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
 - [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
 - [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
 - [x] **Phase 4**: Dependency Readiness Engine (evaluating prerequisite completion, derived `READY`/`BLOCKED` status propagation in topological order, multi-level unlock, downstream rollback on task reopen, converging graph handling, and edge addition/removal recalculation).
+- [x] **Phase 5**: Dependency-Aware Scheduling Engine (constraint-based schedule calculation, non-compounding downstream date propagation, topological schedule recalculation, duration preservation, recomputable baseline schedules, and transactional persistence).
 
 ### Planned (Upcoming Phases)
-- [ ] **Phase 5**: Downstream schedule propagation engine (constraint-based date calculation, non-compounding shift calculation) and critical path analysis
-- [ ] **Phase 6**: Interactive four-column Kanban board with `dnd-kit` and human-in-the-loop AI dependency suggestions
+- [ ] **Phase 6**: Interactive four-column Kanban board with `dnd-kit`, critical path analysis, and human-in-the-loop AI dependency suggestions
