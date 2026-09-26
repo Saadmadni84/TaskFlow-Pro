@@ -44,3 +44,12 @@ logging:
     com.taskflow.taskflow: INFO
     org.springframework.web: INFO
     org.hibernate.SQL: WARN
+
+ai:
+  enabled: ${AI_ENABLED:false}
+  provider: ${AI_PROVIDER:gemini}
+  model: ${AI_MODEL:gemini-1.5-flash}
+  api-key: ${AI_API_KEY:}
+  timeout-seconds: ${AI_TIMEOUT:10}
+  max-suggestions: ${AI_MAX_SUGGESTIONS:10}
+

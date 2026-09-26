@@ -425,11 +425,74 @@ Defined in `.env.example`:
 | `SERVER_PORT` | Backend application port | `8080` |
 | `SPRING_PROFILES_ACTIVE` | Active Spring profile | `dev` |
 | `NEXT_PUBLIC_API_URL` | Frontend API target | `http://localhost:8080/api` |
+| `AI_ENABLED` | Enable AI-assisted dependency suggestion engine | `false` |
+| `AI_PROVIDER` | AI provider strategy (`gemini`, `noop`) | `gemini` |
+| `AI_MODEL` | LLM model identifier | `gemini-1.5-flash` |
+| `AI_API_KEY` | Provider API key | (empty) |
+| `AI_TIMEOUT` | Provider HTTP timeout in seconds | `10` |
+| `AI_MAX_SUGGESTIONS` | Maximum candidate suggestions returned | `10` |
+
+## AI-Assisted Dependency Suggestions
+
+TaskFlow Pro includes an **AI-Assisted Dependency Suggestion Engine** designed to assist engineering teams in discovering potential dependencies across complex project backlogs.
+
+### 1. Architectural Principle: AI Proposes, Human Approves, Deterministic Engine Validates
+
+The AI engine is an **advisory assistant**, never an autonomous decision maker:
+- **No Direct Graph Mutation**: The AI cannot write to the PostgreSQL database, mutate task dependencies, or alter scheduling.
+- **Human-in-the-Loop**: Suggestions are ephemeral candidate proposals presented to the user. A dependency is only persisted when a human user explicitly accepts it via `POST /api/dependency-suggestions/accept`.
+- **Deterministic Engine Authority**: All accepted suggestions are routed through the authoritative `TaskDependencyService`, subjecting the proposed edge to cycle detection, self-dependency checks, project isolation, duplicate checks, readiness recalculation, and topological scheduling.
+
+```text
+Task Context
+     ↓
+AI Suggestion Provider
+     ↓
+Candidate Dependencies
+     ↓
+Human Review
+     ↓
+Deterministic Dependency Service
+     ↓
+DAG Validation
+     ↓
+Persistence
+     ↓
+Readiness + Scheduling
+```
+
+### 2. Context Grounding & Privacy
+To avoid hallucinated dependencies and protect project data:
+- **Project Scoped**: Only tasks belonging to the exact same project as the target task are included in the prompt context. Cross-project tasks are never sent to the model.
+- **Minimal Surface**: The LLM receives only task titles, bounded descriptions (max 500 characters), workflow status, and existing dependency edges. No credentials, user identities, database connection details, or unrelated project data are ever transmitted.
+- **Untrusted Input Defense**: All task titles and descriptions are treated as untrusted data. The prompt explicitly instructs the model to ignore prompt injection attempts or system command overrides embedded inside task text.
+
+### 3. Structured Output & Validation
+- Suggestions are returned as structured JSON containing `predecessorTaskId`, `successorTaskId`, normalized `confidence` (`0.0 <= confidence <= 1.0`), and a concise explanatory `reason`.
+- The server independently validates all model output:
+  1. Both predecessor and successor UUIDs must exist in the database and belong to the same project.
+  2. Self-dependencies (`A -> A`) are discarded.
+  3. Existing project dependencies (`A -> B`) are discarded.
+  4. Suggestions that would create a directed cycle (`C -> A` when `A -> B -> C` exists) are filtered before presentation and strictly rejected during acceptance.
+  5. Invalid confidence values or blank reasons are rejected.
+
+### 4. Resilience & Offline Mode
+- Core TaskFlow Pro operations (task CRUD, dependency creation, cycle detection, readiness calculation, scheduling, impact preview) **operate completely independently of AI**.
+- When `AI_ENABLED=false` or when the provider is unreachable (network timeout, rate limit 429, 5xx server error), the system degrades gracefully with standard error responses (`AI_DISABLED` or `AI_UNAVAILABLE`) without impacting application startup or core functionality.
+
+## AI-Tool Declaration
+
+In accordance with platform governance and transparency requirements:
+- **Feature**: LLM-assisted task dependency suggestion (`POST /api/tasks/{taskId}/dependency-suggestions` and `POST /api/dependency-suggestions/accept`).
+- **Data Transmitted**: Task identifiers, task titles, truncated descriptions, and existing dependency pairs within the same project.
+- **Human Approval**: Mandatory. Suggestions are purely informational and are never persisted automatically.
+- **Safety Authority**: Deterministic backend graph algorithms (`DependencyGraphBuilder`, `CycleDetectionService`, `GraphTraversalService`) have sole authority over graph validity and persistence.
+- **Offline Guarantee**: The platform functions fully without an AI provider or API key configured.
 
 ## Testing
 
 ### Backend Tests
-Runs both context initialization, structured exception handler verification, and database integration:
+Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, and AI suggestion tests:
 ```bash
 cd backend
 ./mvnw test
@@ -444,13 +507,15 @@ npm run build
 
 ## Future Modules
 
-### Implemented (Phases 1 - 6)
+### Implemented (Phases 1 - 7)
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
 - [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
 - [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
 - [x] **Phase 4**: Dependency Readiness Engine (evaluating prerequisite completion, derived `READY`/`BLOCKED` status propagation in topological order, multi-level unlock, downstream rollback on task reopen, converging graph handling, and edge addition/removal recalculation).
 - [x] **Phase 5**: Dependency-Aware Scheduling Engine (constraint-based schedule calculation, non-compounding downstream date propagation, topological schedule recalculation, duration preservation, recomputable baseline schedules, and transactional persistence).
 - [x] **Phase 6**: Dependency Impact Preview (side-effect-free in-memory schedule simulation, identical calculation engine reuse, binding predecessor identification, converging path non-compounding explanation, preview/commit consistency verification, and REST preview API).
+- [x] **Phase 7**: AI-Assisted Dependency Suggestion Engine (pluggable provider abstraction, Google Gemini REST adapter with JSON schema enforcement, grounded project task context, prompt injection defense, server-side validation against hallucination/cycles/cross-project/self-dependency, human-in-the-loop explicit acceptance flow delegating to deterministic graph engine, offline degradation, and comprehensive unit/integration test suite).
 
 ### Planned (Upcoming Phases)
-- [ ] **Phase 7**: Interactive four-column Kanban board with `dnd-kit`, critical path analysis, and human-in-the-loop AI dependency suggestions
+- [ ] **Phase 8**: Interactive four-column Kanban board with `dnd-kit` and critical path analysis
+
