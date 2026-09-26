@@ -14,6 +14,7 @@ import com.taskflow.taskflow.dependency.graph.CycleDetectionService;
 import com.taskflow.taskflow.dependency.graph.DependencyGraph;
 import com.taskflow.taskflow.dependency.graph.DependencyGraphBuilder;
 import com.taskflow.taskflow.dependency.graph.GraphTraversalService;
+import com.taskflow.taskflow.dependency.readiness.DependencyReadinessService;
 import com.taskflow.taskflow.dependency.repository.TaskDependencyRepository;
 import com.taskflow.taskflow.task.entity.Task;
 import com.taskflow.taskflow.task.repository.TaskRepository;
@@ -33,19 +34,22 @@ public class TaskDependencyService {
     private final DependencyGraphBuilder graphBuilder;
     private final CycleDetectionService cycleDetectionService;
     private final GraphTraversalService traversalService;
+    private final DependencyReadinessService readinessService;
 
     public TaskDependencyService(
             TaskDependencyRepository dependencyRepository,
             TaskRepository taskRepository,
             DependencyGraphBuilder graphBuilder,
             CycleDetectionService cycleDetectionService,
-            GraphTraversalService traversalService
+            GraphTraversalService traversalService,
+            DependencyReadinessService readinessService
     ) {
         this.dependencyRepository = dependencyRepository;
         this.taskRepository = taskRepository;
         this.graphBuilder = graphBuilder;
         this.cycleDetectionService = cycleDetectionService;
         this.traversalService = traversalService;
+        this.readinessService = readinessService;
     }
 
     /**
@@ -58,6 +62,9 @@ public class TaskDependencyService {
      * 3. Project isolation
      * 4. Duplicate edge rejection
      * 5. Cycle detection: does adding predecessor -> successor close a cycle?
+     *
+     * After persisting the edge, immediately recalculates readiness for the successor
+     * and any of its downstream descendants.
      */
     @Transactional
     public DependencyResponse createDependency(CreateDependencyRequest request) {
@@ -108,7 +115,11 @@ public class TaskDependencyService {
         }
 
         TaskDependency dependency = new TaskDependency(predecessor, successor);
-        TaskDependency saved = dependencyRepository.save(dependency);
+        TaskDependency saved = dependencyRepository.saveAndFlush(dependency);
+
+        // Recalculate readiness for successor and any downstream descendants
+        readinessService.recalculateTaskAndDescendants(successorId);
+
         return DependencyMapper.toResponse(saved);
     }
 
@@ -141,11 +152,19 @@ public class TaskDependencyService {
         return traversalService.getAffectedSubgraph(graph, taskId);
     }
 
+    /**
+     * Removes an existing dependency edge and recalculates readiness for the successor
+     * and any of its downstream descendants.
+     */
     @Transactional
     public void deleteDependency(UUID predecessorTaskId, UUID successorTaskId) {
         if (!dependencyRepository.existsByPredecessorIdAndSuccessorId(predecessorTaskId, successorTaskId)) {
             throw new InvalidDependencyException("Dependency relationship does not exist");
         }
         dependencyRepository.deleteByPredecessorIdAndSuccessorId(predecessorTaskId, successorTaskId);
+        dependencyRepository.flush();
+
+        // Recalculate readiness for successor after prerequisite removal
+        readinessService.recalculateTaskAndDescendants(successorTaskId);
     }
 }

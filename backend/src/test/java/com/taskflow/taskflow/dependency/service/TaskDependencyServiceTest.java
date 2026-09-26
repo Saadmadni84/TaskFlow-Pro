@@ -55,6 +55,9 @@ class TaskDependencyServiceTest {
     @Mock
     private GraphTraversalService traversalService;
 
+    @Mock
+    private com.taskflow.taskflow.dependency.readiness.DependencyReadinessService readinessService;
+
     @InjectMocks
     private TaskDependencyService dependencyService;
 
@@ -88,14 +91,27 @@ class TaskDependencyServiceTest {
         when(cycleDetectionService.wouldCreateCycle(projectGraph, taskA.getId(), taskB.getId())).thenReturn(false);
 
         TaskDependency savedDependency = new TaskDependency(UUID.randomUUID(), taskA, taskB);
-        when(dependencyRepository.save(any(TaskDependency.class))).thenReturn(savedDependency);
+        when(dependencyRepository.saveAndFlush(any(TaskDependency.class))).thenReturn(savedDependency);
 
         DependencyResponse response = dependencyService.createDependency(request);
 
         assertThat(response).isNotNull();
         assertThat(response.predecessorTaskId()).isEqualTo(taskA.getId());
         assertThat(response.successorTaskId()).isEqualTo(taskB.getId());
-        verify(dependencyRepository).save(any(TaskDependency.class));
+        verify(dependencyRepository).saveAndFlush(any(TaskDependency.class));
+        verify(readinessService).recalculateTaskAndDescendants(taskB.getId());
+    }
+
+    @Test
+    @DisplayName("Should delete dependency and trigger readiness recalculation for successor")
+    void shouldDeleteDependencySuccessfully() {
+        when(dependencyRepository.existsByPredecessorIdAndSuccessorId(taskA.getId(), taskB.getId())).thenReturn(true);
+
+        dependencyService.deleteDependency(taskA.getId(), taskB.getId());
+
+        verify(dependencyRepository).deleteByPredecessorIdAndSuccessorId(taskA.getId(), taskB.getId());
+        verify(dependencyRepository).flush();
+        verify(readinessService).recalculateTaskAndDescendants(taskB.getId());
     }
 
     @Test

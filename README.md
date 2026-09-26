@@ -130,6 +130,55 @@ The DAG engine is the deterministic source of truth for graph topology. It is de
 - **Ancestor Traversal**: Traverses upstream prerequisites via incoming edges.
 - **Affected Subgraph**: Produces the set of all downstream tasks affected by a change, ordered in topological sequence for schedule recalculation.
 
+## Dependency Readiness
+
+TaskFlow Pro strictly separates user workflow progression from topological execution readiness:
+
+- **Workflow status is user-controlled** (`BACKLOG`, `IN_PROGRESS`, `REVIEW`, `DONE`): Users freely move tasks across Kanban columns.
+- **Dependency status is server-derived** (`READY`, `BLOCKED`): Derived purely by the backend engine from the workflow completion of prerequisite tasks. Clients cannot manually set dependency status.
+
+### Authoritative Readiness Rules
+
+For any task $T$, let $P(T)$ be its set of direct prerequisites/predecessors:
+
+1. **`READY`**:
+   - $P(T)$ is empty (the task has no prerequisites), **OR**
+   - Every predecessor in $P(T)$ has `workflowStatus == DONE` and is itself satisfied (`READY`).
+2. **`BLOCKED`**:
+   - At least one predecessor in $P(T)$ has `workflowStatus != DONE` or is itself `BLOCKED`.
+
+> **Invariant**: Readiness is never derived from predecessor `dependencyStatus` in isolation. It authoritative requires that all prerequisites have achieved `workflowStatus == DONE`.
+
+### Flow of Readiness Through the Graph
+
+```mermaid
+flowchart TD
+    A["Database Schema"] --> B["Backend API"]
+    B --> C["Integration Tests"]
+
+    A -->|DONE| B
+    B -->|DONE| C
+```
+
+1. **Initial State**:
+   - $A$: `workflowStatus = IN_PROGRESS`, `dependencyStatus = READY` (no prerequisites)
+   - $B$: `workflowStatus = BACKLOG`, `dependencyStatus = BLOCKED` (waiting on $A$)
+   - $C$: `workflowStatus = BACKLOG`, `dependencyStatus = BLOCKED` (waiting on $B$)
+2. **Upstream Completion**:
+   - When $A$ transitions to `DONE`, the readiness engine locates $A$'s affected descendants ($[B, C]$) and evaluates them in strict **topological order**.
+   - $B$'s prerequisites are now satisfied $\rightarrow B$ transitions to `READY`.
+   - $C$'s prerequisite $B$ is not yet `DONE` $\rightarrow C$ remains `BLOCKED`.
+3. **Multi-Level Unlock**:
+   - When $B$ transitions to `DONE`, $C$'s prerequisites are satisfied $\rightarrow C$ transitions to `READY`.
+4. **Downstream Rollback**:
+   - If $A$ is reopened (`DONE -> IN_PROGRESS`), the engine traverses the affected subgraph in topological order.
+   - $B$ is recalculated to `BLOCKED`.
+   - Because $B$'s prerequisite chain is broken, $C$ is immediately recalculated to `BLOCKED`.
+   - Rollback propagates throughout the entire downstream graph—preventing stale `READY` states.
+5. **Converging Dependencies & Idempotency**:
+   - Converging successors (e.g. $B \rightarrow D, C \rightarrow D$) are evaluated exactly once in topological order.
+   - Only tasks whose `dependencyStatus` actually changes are updated and persisted, preventing database write churn and unnecessary optimistic-lock version increments.
+
 ## Technology Stack
 
 ### Backend
@@ -293,12 +342,12 @@ npm run build
 
 ## Future Modules
 
-### Implemented (Phases 1 - 3)
+### Implemented (Phases 1 - 4)
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
 - [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
 - [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
+- [x] **Phase 4**: Dependency Readiness Engine (evaluating prerequisite completion, derived `READY`/`BLOCKED` status propagation in topological order, multi-level unlock, downstream rollback on task reopen, converging graph handling, and edge addition/removal recalculation).
 
 ### Planned (Upcoming Phases)
-- [ ] **Phase 4**: Dependency Readiness Engine (evaluating prerequisite completion, derived `READY`/`BLOCKED` status propagation, task reopen behavior)
-- [ ] **Phase 5**: Downstream schedule propagation engine (non-compounding shift calculation) and critical path analysis
+- [ ] **Phase 5**: Downstream schedule propagation engine (constraint-based date calculation, non-compounding shift calculation) and critical path analysis
 - [ ] **Phase 6**: Interactive four-column Kanban board with `dnd-kit` and human-in-the-loop AI dependency suggestions
