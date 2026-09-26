@@ -489,10 +489,98 @@ In accordance with platform governance and transparency requirements:
 - **Safety Authority**: Deterministic backend graph algorithms (`DependencyGraphBuilder`, `CycleDetectionService`, `GraphTraversalService`) have sole authority over graph validity and persistence.
 - **Offline Guarantee**: The platform functions fully without an AI provider or API key configured.
 
+## Critical Path Analysis
+
+TaskFlow Pro provides a pure, deterministic **Critical Path Analysis Engine** implementing the classic Critical Path Method (CPM).
+
+### 1. Conceptual Overview
+The critical path is the schedule-determining sequence of dependent tasks that defines the minimum total project duration. Any delay to a critical task directly pushes back the overall project completion date.
+
+The calculation is **100% deterministic** and operates independently of any AI/LLM components, database writes, or HTTP concerns.
+
+### 2. Architecture Diagram
+
+```text
+Project
+  │
+  ├── Tasks
+  │
+  └── Dependencies
+          │
+          ↓
+    DAG / Topological Sort (Kahn's Algorithm + Deterministic Tie-Breaking)
+          │
+          ↓
+      Forward Pass (ES, EF = ES + duration - 1)
+          │
+          ↓
+   Project Completion Date = max(EF of all terminal tasks)
+          │
+          ↓
+      Backward Pass (LF = min(succ.LS - 1), LS = LF - duration + 1)
+          │
+          ↓
+        Total Slack = ChronoUnit.DAYS.between(ES, LS)
+          │
+          ↓
+   Critical Tasks (Slack == 0) & Critical Paths Extraction
+```
+
+### 3. Core Terminology & Inclusive Date Semantics
+- **Earliest Start (ES)**: Earliest calendar date a task can begin, constrained by predecessor completion:
+  `ES = max(predecessor.EF + 1 day)` (or task's base scheduled/planned start for root tasks).
+- **Earliest Finish (EF)**: Earliest date the task can complete:
+  `EF = ES + durationDays - 1 day` (inclusive date convention established in Phase 5).
+- **Project Completion Date**: The latest earliest finish among all terminal tasks (out-degree 0):
+  `projectCompletionDate = max(terminal.EF)`.
+- **Latest Finish (LF)**: The latest date a task can finish without delaying project completion:
+  `LF = projectCompletionDate` for terminal tasks; `LF = min(successor.LS - 1 day)` for non-terminal tasks.
+- **Latest Start (LS)**: The latest date a task can start without delaying project completion:
+  `LS = LF - durationDays + 1 day`.
+- **Total Slack**: The number of calendar days a task can be delayed without extending project completion:
+  `totalSlackDays = ChronoUnit.DAYS.between(ES, LS) == ChronoUnit.DAYS.between(EF, LF)`.
+- **Critical Task**: A task whose total slack is exactly zero (`totalSlackDays == 0`).
+- **Critical Path**: A directed, unbroken sequence of critical tasks from a critical root to a critical terminal task.
+
+### 4. Example: Branching & Converging Paths
+Consider a project with tasks A, B, C, D and start date June 1:
+```text
+      ┌──> B (5d) ──┐
+A (3d)│             ├──> D (4d)
+      └──> C (2d) ──┘
+```
+
+1. **Forward Pass**:
+   - `A` (duration 3d): ES = June 1, EF = June 3
+   - `B` (duration 5d, pred A): ES = June 4, EF = June 8
+   - `C` (duration 2d, pred A): ES = June 4, EF = June 5
+   - `D` (duration 4d, preds B & C): ES = max(June 8 + 1, June 5 + 1) = June 9, EF = June 12
+2. **Project Completion Date**:
+   - Terminal task `D`: Completion = June 12.
+3. **Backward Pass**:
+   - `D`: LF = June 12, LS = June 9 (Slack = 0 -> Critical)
+   - `B`: LF = June 8, LS = June 4 (Slack = 0 -> Critical)
+   - `C`: LF = June 8, LS = June 7 (Slack = 3 -> Non-critical)
+   - `A`: LF = min(June 4 - 1, June 7 - 1) = June 3, LS = June 1 (Slack = 0 -> Critical)
+4. **Result**:
+   - Critical tasks: `[A, B, D]`
+   - Critical path: `["A", "B", "D"]` (duration 3 + 5 + 4 = 12 days)
+   - Sub-path `A -> C -> D` has 3 days of float/slack and is non-critical.
+
+### 5. Multiple Critical Paths & Disjoint Subgraphs
+- If parallel branches share the same schedule-determining duration (e.g. `duration(B) == duration(C)`), **all critical sequences are preserved and returned** (e.g., `[[A, B, D], [A, C, D]]`).
+- Projects with multiple independent roots or disconnected subgraphs are fully evaluated. All project tasks are included in the `tasks` metrics list.
+- Reconstructed paths are bounded by a configurable maximum (`MAX_CRITICAL_PATHS = 100`) to prevent exponential path explosion on dense graphs.
+
+### 6. Complexity & Performance
+- **Time Complexity**: `O(V + E)` for topological sorting, forward pass, backward pass, and slack calculation. Path reconstruction is bounded by `O(K * V)` where `K` is the number of critical paths.
+- **Space Complexity**: `O(V + E)` in memory.
+- **Side-Effect Free**: Analytical only. Calling `GET /api/projects/{projectId}/critical-path` performs zero database writes, does not increment entity versions, and leaves task schedules intact.
+
 ## Testing
 
 ### Backend Tests
-Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, and AI suggestion tests:
+Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, and Critical Path Analysis tests:
 ```bash
 cd backend
 ./mvnw test
@@ -507,7 +595,7 @@ npm run build
 
 ## Future Modules
 
-### Implemented (Phases 1 - 7)
+### Implemented (Phases 1 - 8)
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
 - [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
 - [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
@@ -515,7 +603,9 @@ npm run build
 - [x] **Phase 5**: Dependency-Aware Scheduling Engine (constraint-based schedule calculation, non-compounding downstream date propagation, topological schedule recalculation, duration preservation, recomputable baseline schedules, and transactional persistence).
 - [x] **Phase 6**: Dependency Impact Preview (side-effect-free in-memory schedule simulation, identical calculation engine reuse, binding predecessor identification, converging path non-compounding explanation, preview/commit consistency verification, and REST preview API).
 - [x] **Phase 7**: AI-Assisted Dependency Suggestion Engine (pluggable provider abstraction, Google Gemini REST adapter with JSON schema enforcement, grounded project task context, prompt injection defense, server-side validation against hallucination/cycles/cross-project/self-dependency, human-in-the-loop explicit acceptance flow delegating to deterministic graph engine, offline degradation, and comprehensive unit/integration test suite).
+- [x] **Phase 8**: Critical Path Analysis Engine (pure deterministic CPM calculation, forward/backward pass, total slack calculation, critical task identification, bounded multi-path reconstruction, read-only REST API `GET /api/projects/{projectId}/critical-path`, inclusive calendar date arithmetic, and comprehensive test suite).
 
 ### Planned (Upcoming Phases)
-- [ ] **Phase 8**: Interactive four-column Kanban board with `dnd-kit` and critical path analysis
+- [ ] **Phase 9**: Interactive four-column Kanban board with `dnd-kit` and interactive graph visualizations
+
 
