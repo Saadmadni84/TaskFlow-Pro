@@ -23,12 +23,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 /**
  * Concrete LLM provider implementation communicating with Google Gemini via REST API.
  * Uses native Java 21 HttpClient with strict timeouts and structured JSON parsing.
  */
 @Component
+@ConditionalOnProperty(name = "ai.provider", havingValue = "gemini", matchIfMissing = true)
 public class GeminiDependencySuggestionProvider implements DependencySuggestionProvider {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiDependencySuggestionProvider.class);

@@ -121,11 +121,20 @@ export interface TaskSummary {
   title: string;
 }
 
+export type DependencySuggestionValidationStatus =
+  | 'VALID'
+  | 'DUPLICATE'
+  | 'SELF_DEPENDENCY'
+  | 'CYCLE'
+  | 'INVALID_TASK'
+  | 'INVALID_PROJECT';
+
 export interface DependencySuggestion {
   predecessor: TaskSummary;
   successor: TaskSummary;
   confidence: number;
   reason: string;
+  validationStatus?: DependencySuggestionValidationStatus;
 }
 
 export interface DependencySuggestionResponse {
