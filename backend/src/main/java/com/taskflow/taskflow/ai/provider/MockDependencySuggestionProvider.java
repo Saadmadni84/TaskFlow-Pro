@@ -72,6 +72,14 @@ public class MockDependencySuggestionProvider implements DependencySuggestionPro
                         0.80,
                         String.format("Task \"%s\" is referenced in the context of \"%s\".", candidate.title(), target.title())
                 ));
+            } else if (candPhase == 0 && targetPhase == 0 && candTitle.compareTo(targetTitle) < 0) {
+                // Lexical / alphabetical fallback for unclassified sequential tasks (e.g. Step A -> Step B)
+                suggestions.add(new RawDependencySuggestion(
+                        candidate.id(),
+                        target.id(),
+                        0.78,
+                        String.format("Task \"%s\" logically precedes \"%s\" in the project sequence.", candidate.title(), target.title())
+                ));
             }
 
             if (suggestions.size() >= context.maxSuggestions()) {
@@ -91,40 +99,60 @@ public class MockDependencySuggestionProvider implements DependencySuggestionPro
     }
 
     private int determinePhase(String title, String desc) {
-        String combined = (title + " " + desc).toLowerCase(Locale.ROOT);
+        int phaseFromTitle = classifyText(title.toLowerCase(Locale.ROOT));
+        if (phaseFromTitle > 0) {
+            return phaseFromTitle;
+        }
+        return classifyText(desc != null ? desc.toLowerCase(Locale.ROOT) : "");
+    }
 
-        // Phase 1: Database, Schema, Data Model, Architecture, Requirements
-        if (combined.contains("database") || combined.contains("schema") || combined.contains("data model")
-                || combined.contains("architecture") || combined.contains("migration") || combined.contains("requirements")
-                || combined.contains("setup") || combined.contains("specification")) {
-            return 1;
+    private int classifyText(String text) {
+        if (text == null || text.isBlank()) {
+            return 0;
         }
 
-        // Phase 2: Backend, API, REST, Controller, Service, Persistence, Repository, Endpoints
-        if (combined.contains("api") || combined.contains("backend") || combined.contains("service")
-                || combined.contains("controller") || combined.contains("endpoint") || combined.contains("server")
-                || combined.contains("crud") || combined.contains("business logic")) {
-            return 2;
+        // Phase 5: Deployment, Release, Production, CI/CD, Docker, Infra, Step 5, Task E, Fifth
+        if (text.contains("deploy") || text.contains("release") || text.contains("production")
+                || text.contains("docker") || text.contains("ci/cd") || text.contains("pipeline")
+                || text.contains("kubernetes")
+                || text.contains("task e") || text.contains("fifth") || text.contains("step 5")
+                || text.contains("phase 5") || text.contains("part 5")) {
+            return 5;
         }
 
-        // Phase 3: Frontend, UI, Component, View, Page, Client, Design System
-        if (combined.contains("frontend") || combined.contains("ui") || combined.contains("client")
-                || combined.contains("view") || combined.contains("component") || combined.contains("page")
-                || combined.contains("react") || combined.contains("dashboard")) {
-            return 3;
-        }
-
-        // Phase 4: Testing, QA, Integration Test, E2E, Verification
-        if (combined.contains("test") || combined.contains("qa") || combined.contains("integration")
-                || combined.contains("e2e") || combined.contains("validation") || combined.contains("verification")) {
+        // Phase 4: Testing, QA, Integration Test, E2E, Verification, Step 4, Task D, Fourth
+        if (text.contains("test") || text.contains("qa") || text.contains("integration")
+                || text.contains("e2e") || text.contains("validation") || text.contains("verification")
+                || text.contains("task d") || text.contains("fourth") || text.contains("step 4")
+                || text.contains("phase 4") || text.contains("part 4")) {
             return 4;
         }
 
-        // Phase 5: Deployment, Release, Production, CI/CD, Docker, Infra
-        if (combined.contains("deploy") || combined.contains("release") || combined.contains("production")
-                || combined.contains("docker") || combined.contains("ci/cd") || combined.contains("pipeline")
-                || combined.contains("kubernetes")) {
-            return 5;
+        // Phase 3: Frontend, UI, Component, View, Page, Client, Design System, Step 3, Task C, Third
+        if (text.contains("frontend") || text.contains("ui") || text.contains("client")
+                || text.contains("view") || text.contains("component") || text.contains("page")
+                || text.contains("react") || text.contains("dashboard")
+                || text.contains("task c") || text.contains("third") || text.contains("step 3")
+                || text.contains("phase 3") || text.contains("part 3")) {
+            return 3;
+        }
+
+        // Phase 2: Backend, API, REST, Controller, Service, Persistence, Repository, Endpoints, Step 2, Task B, Second
+        if (text.contains("api") || text.contains("backend") || text.contains("service")
+                || text.contains("controller") || text.contains("endpoint") || text.contains("server")
+                || text.contains("crud") || text.contains("business logic")
+                || text.contains("task b") || text.contains("second") || text.contains("step 2")
+                || text.contains("phase 2") || text.contains("part 2")) {
+            return 2;
+        }
+
+        // Phase 1: Database, Schema, Data Model, Architecture, Requirements, Step 1, Task A, First
+        if (text.contains("database") || text.contains("schema") || text.contains("data model")
+                || text.contains("architecture") || text.contains("migration") || text.contains("requirements")
+                || text.contains("setup") || text.contains("specification")
+                || text.contains("task a") || text.contains("first") || text.contains("step 1")
+                || text.contains("phase 1") || text.contains("part 1")) {
+            return 1;
         }
 
         return 0; // Unclassified
