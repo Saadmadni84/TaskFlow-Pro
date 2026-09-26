@@ -226,6 +226,61 @@ Because schedules are derived from:
 $$\text{plannedStartDate} + \text{current dependency constraints}$$
 if an upstream task $A$ is moved earlier, downstream successors can return to their independent baseline planned schedule without relying on historical delta records or accumulated state drift.
 
+## Dependency Impact Preview
+
+TaskFlow Pro provides a high-fidelity **Dependency Impact Preview** capability. Before committing a task schedule mutation, clients can query the system to evaluate the exact downstream schedule consequences:
+
+> *"If I make this proposed schedule change, which downstream tasks will be affected, what will their new scheduled dates be, and why?"*
+
+### Conceptual Architecture & Execution Flow
+
+```text
+               Proposed date
+                     ↓
+            Affected descendants (DAG)
+                     ↓
+             Topological ordering
+                     ↓
+         In-memory schedule simulation
+       (Shared ScheduleCalculationService)
+                     ↓
+          Compare current vs proposed
+                     ↓
+     Explain constraints & binding predecessors
+                     ↓
+               Return preview
+```
+
+### Core Architectural Guarantees
+
+1. **Side-Effect Free Simulation**:
+   - The preview endpoint (`POST /api/tasks/{taskId}/schedule/preview`) executes with `@Transactional(readOnly = true)`.
+   - Never writes to the database, never modifies JPA entities, never mutates `updatedAt`, never increments `@Version`, and publishes zero domain events.
+   - All evaluations occur in memory on lightweight simulation projections. The preview can be called repeatedly and safely in real-time as a user drags dates or types input.
+
+2. **Single Source of Truth (Zero Calculation Drift)**:
+   - Preview and actual mutation (`PUT /api/tasks/{id}`) invoke the **exact same deterministic engine**: `ScheduleCalculationService`.
+   - The preview exactly predicts the committed database state, eliminating discrepancies where a preview promises one date but commit produces another.
+
+3. **Descendant Discovery & Project Graph Scope**:
+   - Uses the DAG traversal engine to extract the `AffectedSubgraph` for the source task.
+   - Unrelated components (e.g. $X \rightarrow Y \rightarrow Z$ when modifying $A \rightarrow B \rightarrow C$) are excluded from recalculation and response payloads.
+   - Single-batch loading (`findByProjectId`) fetches tasks efficiently in $O(V + E)$ without $N+1$ database roundtrips.
+
+4. **Converging Path Non-Compounding Evaluation**:
+   - In diamond graphs ($A \rightarrow B \rightarrow D$, $A \rightarrow C \rightarrow D$), shifting $A$ by $+3$ days shifts $B$ by $+3$ days, $C$ by $+3$ days, and $D$ by $+3$ days.
+   - The engine computes $\max(B.\text{due} + 1, C.\text{due} + 1)$ rather than adding delays together ($+3 + 3 = +6$).
+
+5. **Binding Predecessor Identification**:
+   - Successors determine their earliest allowed start from the maximum required start across all direct predecessors:
+     $$\text{latestConstraint} = \max_{P \in \text{predecessors}} (P.\text{scheduledDueDate} + 1\text{ day})$$
+   - Every predecessor $P$ where $P.\text{scheduledDueDate} + 1 == \text{latestConstraint}$ is identified as a **binding predecessor** (`constraintSourceTaskIds`).
+   - If multiple predecessors finish on the same maximum date, all binding predecessors are reported.
+
+6. **Baseline vs. Constraint Disambiguation**:
+   - If a successor's independent `plannedStartDate` is later than or equal to the dependency constraint date, the task is classified as `PLANNED_DATE_DOMINANT`.
+   - The preview clearly explains that the task's schedule is unchanged because its planned schedule is already later than the dependency requirement, rather than falsely claiming a dependency delay.
+
 ## Technology Stack
 
 ### Backend
@@ -389,12 +444,13 @@ npm run build
 
 ## Future Modules
 
-### Implemented (Phases 1 - 5)
+### Implemented (Phases 1 - 6)
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
 - [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
 - [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
 - [x] **Phase 4**: Dependency Readiness Engine (evaluating prerequisite completion, derived `READY`/`BLOCKED` status propagation in topological order, multi-level unlock, downstream rollback on task reopen, converging graph handling, and edge addition/removal recalculation).
 - [x] **Phase 5**: Dependency-Aware Scheduling Engine (constraint-based schedule calculation, non-compounding downstream date propagation, topological schedule recalculation, duration preservation, recomputable baseline schedules, and transactional persistence).
+- [x] **Phase 6**: Dependency Impact Preview (side-effect-free in-memory schedule simulation, identical calculation engine reuse, binding predecessor identification, converging path non-compounding explanation, preview/commit consistency verification, and REST preview API).
 
 ### Planned (Upcoming Phases)
-- [ ] **Phase 6**: Interactive four-column Kanban board with `dnd-kit`, critical path analysis, and human-in-the-loop AI dependency suggestions
+- [ ] **Phase 7**: Interactive four-column Kanban board with `dnd-kit`, critical path analysis, and human-in-the-loop AI dependency suggestions
