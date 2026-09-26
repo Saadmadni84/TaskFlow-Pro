@@ -41,3 +41,11 @@ export const BoardSkeleton: React.FC = () => {
     </div>
   );
 };
+
+export const Skeleton: React.FC<{ className?: string }> = ({ className }) => {
+  return (
+    <div
+      className={`animate-pulse rounded bg-zinc-800/80 ${className || 'h-4 w-full'}`}
+    />
+  );
+};
