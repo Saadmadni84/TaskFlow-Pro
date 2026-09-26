@@ -11,8 +11,12 @@ export default function ErrorBoundary({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log unexpected errors
-    console.error('TaskFlow Pro UI Error:', error);
+    // Operational UI error logging
+    console.error('TaskFlow Pro UI Error:', {
+      name: error.name,
+      message: error.message,
+      digest: error.digest,
+    });
   }, [error]);
 
   return (
@@ -31,8 +35,13 @@ export default function ErrorBoundary({
       <div className="space-y-1">
         <h2 className="text-lg font-semibold text-zinc-100">Something went wrong</h2>
         <p className="text-xs text-zinc-400 max-w-md">
-          An unexpected interface error occurred. You can try refreshing the page or reloading your board.
+          An unexpected interface error occurred. You can retry the operation or refresh the page.
         </p>
+        {error.digest && (
+          <p className="text-[11px] font-mono text-zinc-500 pt-1">
+            Reference ID: <span className="text-zinc-400">{error.digest}</span>
+          </p>
+        )}
       </div>
 
       <div className="flex gap-3">

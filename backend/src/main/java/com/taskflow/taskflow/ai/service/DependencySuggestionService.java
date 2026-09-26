@@ -60,6 +60,28 @@ public class DependencySuggestionService {
     private final TaskDependencyService taskDependencyService;
     private final DependencyGraphBuilder graphBuilder;
     private final GraphTraversalService traversalService;
+    private final com.taskflow.taskflow.common.metrics.TaskFlowMetrics metrics;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DependencySuggestionService(
+            AiProperties aiProperties,
+            DependencySuggestionProvider provider,
+            TaskRepository taskRepository,
+            TaskDependencyRepository dependencyRepository,
+            TaskDependencyService taskDependencyService,
+            DependencyGraphBuilder graphBuilder,
+            GraphTraversalService traversalService,
+            com.taskflow.taskflow.common.metrics.TaskFlowMetrics metrics
+    ) {
+        this.aiProperties = aiProperties;
+        this.provider = provider;
+        this.taskRepository = taskRepository;
+        this.dependencyRepository = dependencyRepository;
+        this.taskDependencyService = taskDependencyService;
+        this.graphBuilder = graphBuilder;
+        this.traversalService = traversalService;
+        this.metrics = metrics != null ? metrics : new com.taskflow.taskflow.common.metrics.TaskFlowMetrics(null);
+    }
 
     public DependencySuggestionService(
             AiProperties aiProperties,
@@ -70,13 +92,8 @@ public class DependencySuggestionService {
             DependencyGraphBuilder graphBuilder,
             GraphTraversalService traversalService
     ) {
-        this.aiProperties = aiProperties;
-        this.provider = provider;
-        this.taskRepository = taskRepository;
-        this.dependencyRepository = dependencyRepository;
-        this.taskDependencyService = taskDependencyService;
-        this.graphBuilder = graphBuilder;
-        this.traversalService = traversalService;
+        this(aiProperties, provider, taskRepository, dependencyRepository, taskDependencyService,
+                graphBuilder, traversalService, new com.taskflow.taskflow.common.metrics.TaskFlowMetrics(null));
     }
 
     /**
@@ -88,10 +105,12 @@ public class DependencySuggestionService {
      * @return filtered, grounded dependency suggestions
      */
     public DependencySuggestionResponse generateSuggestions(UUID targetTaskId, Integer requestedLimit) {
+        long startTime = System.currentTimeMillis();
         Objects.requireNonNull(targetTaskId, "Target task ID must not be null");
 
         if (!aiProperties.isEnabled()) {
-            log.info("AI dependency suggestions requested for task [{}] but AI engine is disabled", targetTaskId);
+            log.warn("operation=AI_DEPENDENCY_SUGGESTION targetTaskId={} result=DISABLED", targetTaskId);
+            metrics.recordAiSuggestion(System.currentTimeMillis() - startTime, "disabled");
             throw new AiDisabledException();
         }
 
@@ -235,8 +254,10 @@ public class DependencySuggestionService {
             }
         }
 
-        log.info("Successfully produced {} validated dependency suggestions for task [{}]",
-                validatedSuggestions.size(), targetTaskId);
+        long durationMs = System.currentTimeMillis() - startTime;
+        log.info("operation=AI_DEPENDENCY_SUGGESTION projectId={} targetTaskId={} candidateCount={} provider={} result=SUCCESS suggestionCount={} durationMs={}",
+                projectId, targetTaskId, candidateTasks.size(), provider.getProviderName(), validatedSuggestions.size(), durationMs);
+        metrics.recordAiSuggestion(durationMs, "success");
 
         return new DependencySuggestionResponse(targetTaskId, validatedSuggestions.size(), validatedSuggestions);
     }

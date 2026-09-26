@@ -705,14 +705,14 @@ AI Dependency Suggestions (Semantic suggestions reviewed and explicitly accepted
 ## Testing
 
 ### Backend Tests
-Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, Critical Path Analysis tests, optimistic locking concurrency tests, transactional rollback tests, preview-commit consistency tests, Golden Scenario E2E integration tests, and Dependency Graph query service / REST controller tests (178 tests):
+Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, Critical Path Analysis tests, optimistic locking concurrency tests, transactional rollback tests, preview-commit consistency tests, Golden Scenario E2E integration tests, Dependency Graph query service / REST controller tests, RequestIdFilter tests, Large DAG sanity stress tests, and Golden Operation Trace integration tests (183 tests):
 ```bash
 cd backend
 ./mvnw test
 ```
 
 ### Frontend Tests
-Runs comprehensive component and hook tests with Vitest and React Testing Library (27 tests across 10 suites):
+Runs comprehensive component and hook tests with Vitest and React Testing Library (30 tests across 11 suites):
 ```bash
 cd frontend
 npm test
@@ -782,6 +782,88 @@ docker compose up --build
 - **Backend**: Multi-stage `eclipse-temurin:21-jre-alpine` container running as non-root user `taskflow` with Actuator liveness/readiness probe on `/actuator/health`.
 - **Frontend**: Multi-stage `node:20-alpine` standalone runner on port 3000 running as non-root user `nextjs`.
 
+## Observability & Operations (Phase 11)
+
+TaskFlow Pro features a lightweight, production-grade observability and diagnostics architecture built entirely on Spring Boot Actuator, Micrometer, SLF4J/Logback, and normalized frontend error reporting without unnecessary distributed infrastructure (no Kafka, Redis, Elasticsearch, Prometheus server, or OpenTelemetry collectors).
+
+### 1. Structured Logging & Operation Tracking
+Backend services log operation boundaries using structured key-value pairs designed for machine parsing and rapid operator diagnostics:
+
+```text
+2026-09-27T00:04:24.089+05:30  INFO 91592 --- [taskflow-pro] [main] c.t.t.s.service.SchedulingService : operation=SCHEDULE_PROPAGATION rootTaskId=e053a2e6-c4f8-4a8b-a0d0-8a4812dbdfd3 projectId=c87eabf6-fcc1-4ddc-83b7-91ae17898437 affectedTaskCount=4 changedTaskCount=4 maxScheduleShiftDays=3 durationMs=3 result=SUCCESS
+```
+
+Key monitored domain operations:
+- `TASK_CREATE`, `TASK_UPDATE`, `TASK_DELETE`: Entity mutations, status transitions, and duration.
+- `DEPENDENCY_CREATE`: Predecessor/successor IDs, project scope, and explicit results (`SUCCESS`, `CYCLE_REJECTED`, `DUPLICATE_REJECTED`, `SELF_DEPENDENCY_REJECTED`, `NOT_FOUND`).
+- `DEPENDENCY_REMOVE`: Edge removal and cascade timings.
+- `DEPENDENCY_READINESS_RECALCULATION`: Topological propagation, `affectedTaskCount`, `changedTaskCount`, `readyCount`, `blockedCount`, and `durationMs`.
+- `SCHEDULE_PROPAGATION` & `SCHEDULE_PREVIEW`: Root task ID, affected count, non-compounding `maxScheduleShiftDays`, and calculation duration.
+- `CRITICAL_PATH_CALCULATION`: Project ID, task count, critical task count, multi-path count, project duration in days, and computation duration.
+- `AI_DEPENDENCY_SUGGESTION`: Provider, target task, candidate count, result (`SUCCESS`, `DISABLED`, `RATE_LIMITED`, `PROVIDER_ERROR`), suggestion count, and duration.
+
+> **Security Guarantee**: Logging never includes passwords, database credentials, API keys, JWTs, cookies, request bodies, complete AI prompts, or full model responses.
+
+### 2. Request Correlation & Tracing
+- **`RequestIdFilter`**: Automatically captures incoming `X-Request-Id` (sanitizing to `^[a-zA-Z0-9_-]{1,64}$`) or generates a standard UUID.
+- **MDC Context**: Injects `requestId` into SLF4J MDC for automatic inclusion in every log line and clears context in a `finally` block to prevent thread leaks.
+- **Header & Payload Echo**: Returns `X-Request-Id` in all HTTP response headers and embeds `requestId` in JSON error responses (`ErrorResponse`).
+
+### 3. HTTP Request Observability & Error Classification
+- **`HttpRequestLoggingFilter`**: Captures method, URI path, HTTP status, duration in ms, and `requestId`.
+- **Level Differentiation**:
+  - `2xx / 3xx`: Logged at `INFO`
+  - `4xx` (Client & business validation errors, cycle rejections, not found): Logged at `WARN` without noisy stack traces.
+  - `5xx` (Unexpected server/database faults): Logged at `ERROR` with full stack traces.
+  - Internal actuator health checks (`/actuator/health`): Filtered to `DEBUG` to prevent high-frequency probe log spam.
+
+### 4. Health & Readiness Probes
+- **Endpoint**: `GET /actuator/health`
+- **Checks**:
+  - Application liveness and readiness state.
+  - Database connectivity probe verifying PostgreSQL socket reachability and responsiveness.
+- Exposes no environment variables, heap dumps, or sensitive configuration internals.
+
+### 5. Application Metrics (Micrometer / Actuator)
+Lightweight application metrics registered in Spring Boot's `MeterRegistry` using strictly low-cardinality tags (`operation`, `result`, `status`):
+- `task_create_total`, `task_update_total`, `task_delete_total`
+- `dependency_create_total` (tag: `result` -> `success`, `cycle_rejected`, etc.)
+- `dependency_remove_total`
+- `dependency_cycle_rejection_total`
+- `schedule_propagation_total` & `schedule_propagation_duration` (Timer)
+- `readiness_recalculation_total` & `readiness_recalculation_duration` (Timer)
+- `ai_suggestion_request_total` & `ai_suggestion_duration` (Timer)
+- `ai_suggestion_failure_total`
+
+### 6. Frontend Diagnostics & Normalized Error Handling
+- **API Error Normalization (`formatApiError`)**: Normalizes `ApiClientError`, HTTP network faults, and client validation errors into user-friendly messages with error codes and correlation IDs:
+  - `CYCLE_DETECTED`: "This dependency would create a cycle, so it was not added."
+  - `CONCURRENCY_CONFLICT`: "This task was changed elsewhere. Refresh and try again."
+  - `VALIDATION_ERROR`: "Please check the task details and try again."
+  - `AI_DISABLED`: "AI suggestions are temporarily unavailable. You can add the dependency manually."
+- **React Error Boundary (`error.tsx`)**: Dark-themed, responsive error boundary preventing blank screens, offering a retry action (`reset()`), page refresh, and displaying reference IDs (`error.digest` / `requestId`) without exposing stack traces.
+
+### 7. Step-by-Step Operator Debugging Workflow
+```text
+1. Capture Request ID: Obtain the correlation ID from the UI alert or the X-Request-Id HTTP response header.
+2. Search Backend Logs: grep "requestId=<UUID>" /path/to/backend.log
+3. Identify Operation & Code: Check operation=<NAME> result=<RESULT> and status=<CODE>.
+4. Analyze Root Cause: Inspect affectedTaskId, reason, or constraint details.
+5. Verify State: Check project and task status in database or via GET /api/projects/{projectId}/dependency-graph.
+```
+
+### 8. Operational Troubleshooting Table
+
+| Symptom | Likely Area | What to Inspect |
+|---|---|---|
+| **Dependency not added** | DAG validation | Search logs for `operation=DEPENDENCY_CREATE` and inspect `result` (`CYCLE_REJECTED`, `SELF_DEPENDENCY_REJECTED`, or `DUPLICATE_REJECTED`). |
+| **Task unexpectedly BLOCKED** | Readiness engine | Search logs for `operation=DEPENDENCY_READINESS_RECALCULATION` and inspect predecessor workflow statuses (`BACKLOG`, `IN_PROGRESS` vs `DONE`). |
+| **Schedule changed unexpectedly** | Scheduling engine | Search logs for `operation=SCHEDULE_PROPAGATION` and check `maxScheduleShiftDays` and root task planned start date change. |
+| **Preview differs from commit** | Scheduling simulation | Compare `operation=SCHEDULE_PREVIEW` logs with `operation=SCHEDULE_PROPAGATION` logs for the same root task ID. |
+| **AI suggestions unavailable** | AI provider / Rate limiter | Search logs for `operation=AI_DEPENDENCY_SUGGESTION` and check `result` (`DISABLED`, `RATE_LIMITED`, or `PROVIDER_ERROR`). Verify deterministic workflow continues unaffected. |
+| **Update rejected (409)** | Optimistic locking | Search logs for `Optimistic locking conflict` with `code=CONCURRENCY_CONFLICT` and `requestId`. Concurrently modified entity version requires reload. |
+| **Slow graph propagation** | Graph engine | Search logs for `durationMs` in `SCHEDULE_PROPAGATION` or `DEPENDENCY_READINESS_RECALCULATION`. Verify `LargeDagSanityTest` baseline (< 500ms for 1,000 tasks). |
+
 ---
 
 ## Implemented Phases
@@ -797,6 +879,7 @@ docker compose up --build
 - [x] **Phase 9**: Production Kanban Frontend and Workflow UI (responsive 4-column Kanban board, authoritative readiness and schedule display, accessible card actions, optimistic UI with server rollback, schedule impact preview intercept modal, dependency management with cycle error reporting, AI suggestion review with explicit acceptance, and multi-path critical path analysis modal).
 - [x] **Phase 10**: Production Hardening, Security, E2E Validation & Deployment Readiness (HTTP security headers, correlation ID request tracing, sliding-window AI rate limiting, input boundary constraints, optimistic locking concurrency protection, atomic rollback guarantees, preview/commit consistency verification, Golden Scenario E2E test, deterministic seed demo migration, multi-stage production Dockerfiles, Actuator health probes, and full Docker Compose orchestration).
 - [x] **Functional Completion & Visual DAG**: Dedicated Visual DAG representation powered by `@xyflow/react` and `@dagrejs/dagre`, backend `GET /api/projects/{projectId}/dependency-graph` query endpoint, predecessor → successor arrow semantics, Dagre layout engine, node selection & chain highlighting, slide-out inspector, cycle rejection error messaging, accessible list alternative, responsive canvas controls, and dual-view workspace switching.
+- [x] **Phase 11**: Observability, Diagnostics & Production Operations (Correlation `X-Request-Id` filter, sanitized MDC tracing, structured domain operation logging, 4xx/5xx HTTP request classification, Micrometer application metrics, actuator health validation, large DAG sanity stress test for 1,000 tasks, Golden Operation Trace integration test, centralized frontend error normalization, accessible error boundary with reference ID display, and operator troubleshooting guide).
 
 
 

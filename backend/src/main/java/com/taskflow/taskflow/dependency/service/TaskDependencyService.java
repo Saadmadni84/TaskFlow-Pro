@@ -5,6 +5,7 @@ import com.taskflow.taskflow.common.exception.DuplicateDependencyException;
 import com.taskflow.taskflow.common.exception.InvalidDependencyException;
 import com.taskflow.taskflow.common.exception.SelfDependencyException;
 import com.taskflow.taskflow.common.exception.TaskNotFoundException;
+import com.taskflow.taskflow.common.metrics.TaskFlowMetrics;
 import com.taskflow.taskflow.dependency.dto.CreateDependencyRequest;
 import com.taskflow.taskflow.dependency.dto.DependencyMapper;
 import com.taskflow.taskflow.dependency.dto.DependencyResponse;
@@ -19,6 +20,9 @@ import com.taskflow.taskflow.dependency.repository.TaskDependencyRepository;
 import com.taskflow.taskflow.scheduling.service.SchedulingService;
 import com.taskflow.taskflow.task.entity.Task;
 import com.taskflow.taskflow.task.repository.TaskRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +34,8 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class TaskDependencyService {
 
+    private static final Logger log = LoggerFactory.getLogger(TaskDependencyService.class);
+
     private final TaskDependencyRepository dependencyRepository;
     private final TaskRepository taskRepository;
     private final DependencyGraphBuilder graphBuilder;
@@ -37,6 +43,28 @@ public class TaskDependencyService {
     private final GraphTraversalService traversalService;
     private final DependencyReadinessService readinessService;
     private final SchedulingService schedulingService;
+    private final TaskFlowMetrics metrics;
+
+    @Autowired
+    public TaskDependencyService(
+            TaskDependencyRepository dependencyRepository,
+            TaskRepository taskRepository,
+            DependencyGraphBuilder graphBuilder,
+            CycleDetectionService cycleDetectionService,
+            GraphTraversalService traversalService,
+            DependencyReadinessService readinessService,
+            SchedulingService schedulingService,
+            TaskFlowMetrics metrics
+    ) {
+        this.dependencyRepository = dependencyRepository;
+        this.taskRepository = taskRepository;
+        this.graphBuilder = graphBuilder;
+        this.cycleDetectionService = cycleDetectionService;
+        this.traversalService = traversalService;
+        this.readinessService = readinessService;
+        this.schedulingService = schedulingService;
+        this.metrics = metrics != null ? metrics : new TaskFlowMetrics(null);
+    }
 
     public TaskDependencyService(
             TaskDependencyRepository dependencyRepository,
@@ -47,13 +75,8 @@ public class TaskDependencyService {
             DependencyReadinessService readinessService,
             SchedulingService schedulingService
     ) {
-        this.dependencyRepository = dependencyRepository;
-        this.taskRepository = taskRepository;
-        this.graphBuilder = graphBuilder;
-        this.cycleDetectionService = cycleDetectionService;
-        this.traversalService = traversalService;
-        this.readinessService = readinessService;
-        this.schedulingService = schedulingService;
+        this(dependencyRepository, taskRepository, graphBuilder, cycleDetectionService,
+                traversalService, readinessService, schedulingService, new TaskFlowMetrics(null));
     }
 
     /**
@@ -72,28 +95,45 @@ public class TaskDependencyService {
      */
     @Transactional
     public DependencyResponse createDependency(CreateDependencyRequest request) {
+        long startTime = System.currentTimeMillis();
         UUID predecessorId = request.predecessorTaskId();
         UUID successorId = request.successorTaskId();
 
         if (predecessorId == null || successorId == null) {
+            log.warn("operation=DEPENDENCY_CREATE result=VALIDATION_FAILED reason=\"Null predecessor or successor ID\"");
+            metrics.recordDependencyCreated("validation_failed");
             throw new InvalidDependencyException("Predecessor and successor task IDs must not be null");
         }
 
         // Invariant 1: Self-dependency forbidden
         if (predecessorId.equals(successorId)) {
+            log.warn("operation=DEPENDENCY_CREATE predecessorTaskId={} successorTaskId={} result=SELF_DEPENDENCY_REJECTED",
+                    predecessorId, successorId);
+            metrics.recordDependencyCreated("self_rejected");
             throw new SelfDependencyException(predecessorId);
         }
 
         // Invariant 2: Both tasks must exist
         Task predecessor = taskRepository.findById(predecessorId)
-                .orElseThrow(() -> new TaskNotFoundException(predecessorId));
+                .orElseThrow(() -> {
+                    log.warn("operation=DEPENDENCY_CREATE predecessorTaskId={} result=NOT_FOUND", predecessorId);
+                    metrics.recordDependencyCreated("not_found");
+                    return new TaskNotFoundException(predecessorId);
+                });
         Task successor = taskRepository.findById(successorId)
-                .orElseThrow(() -> new TaskNotFoundException(successorId));
+                .orElseThrow(() -> {
+                    log.warn("operation=DEPENDENCY_CREATE successorTaskId={} result=NOT_FOUND", successorId);
+                    metrics.recordDependencyCreated("not_found");
+                    return new TaskNotFoundException(successorId);
+                });
 
         // Invariant 3: Project isolation - tasks must belong to the exact same project
         UUID predProjectId = predecessor.getProject().getId();
         UUID succProjectId = successor.getProject().getId();
         if (!predProjectId.equals(succProjectId)) {
+            log.warn("operation=DEPENDENCY_CREATE predecessorProjectId={} successorProjectId={} result=CROSS_PROJECT_REJECTED",
+                    predProjectId, succProjectId);
+            metrics.recordDependencyCreated("cross_project_rejected");
             throw new InvalidDependencyException(
                     String.format("Cross-project dependencies are forbidden: predecessor project [%s] does not match successor project [%s]",
                             predProjectId, succProjectId)
@@ -102,6 +142,9 @@ public class TaskDependencyService {
 
         // Invariant 4: No duplicate dependency edges
         if (dependencyRepository.existsByPredecessorIdAndSuccessorId(predecessorId, successorId)) {
+            log.warn("operation=DEPENDENCY_CREATE projectId={} predecessorTaskId={} successorTaskId={} result=DUPLICATE_REJECTED",
+                    predProjectId, predecessorId, successorId);
+            metrics.recordDependencyCreated("duplicate_rejected");
             throw new DuplicateDependencyException(
                     String.format("Dependency edge already exists from task [%s] to task [%s]", predecessorId, successorId)
             );
@@ -110,6 +153,10 @@ public class TaskDependencyService {
         // Invariant 5: Cycle detection - targeted reachability check before persistence
         DependencyGraph projectGraph = graphBuilder.buildGraphForProject(predProjectId);
         if (cycleDetectionService.wouldCreateCycle(projectGraph, predecessorId, successorId)) {
+            log.warn("operation=DEPENDENCY_CREATE projectId={} predecessorTaskId={} successorTaskId={} result=CYCLE_REJECTED",
+                    predProjectId, predecessorId, successorId);
+            metrics.recordDependencyCreated("cycle_rejected");
+            metrics.recordCycleRejection();
             Optional<List<UUID>> cyclePath = cycleDetectionService.getPotentialCyclePath(projectGraph, predecessorId, successorId);
             throw new CycleDetectedException(
                     String.format("Circular dependency detected: adding dependency [%s -> %s] would create a cycle",
@@ -126,6 +173,11 @@ public class TaskDependencyService {
 
         // Recalculate schedule for successor and any downstream descendants (Phase 5)
         schedulingService.recalculateTaskAndDescendants(successorId);
+
+        long durationMs = System.currentTimeMillis() - startTime;
+        log.info("operation=DEPENDENCY_CREATE projectId={} predecessorTaskId={} successorTaskId={} result=SUCCESS durationMs={}",
+                predProjectId, predecessorId, successorId, durationMs);
+        metrics.recordDependencyCreated("success");
 
         return DependencyMapper.toResponse(saved);
     }
@@ -165,7 +217,10 @@ public class TaskDependencyService {
      */
     @Transactional
     public void deleteDependency(UUID predecessorTaskId, UUID successorTaskId) {
+        long startTime = System.currentTimeMillis();
         if (!dependencyRepository.existsByPredecessorIdAndSuccessorId(predecessorTaskId, successorTaskId)) {
+            log.warn("operation=DEPENDENCY_REMOVE predecessorTaskId={} successorTaskId={} result=NOT_FOUND",
+                    predecessorTaskId, successorTaskId);
             throw new InvalidDependencyException("Dependency relationship does not exist");
         }
         dependencyRepository.deleteByPredecessorIdAndSuccessorId(predecessorTaskId, successorTaskId);
@@ -176,5 +231,10 @@ public class TaskDependencyService {
 
         // Recalculate schedule for successor after prerequisite removal (Phase 5)
         schedulingService.recalculateTaskAndDescendants(successorTaskId);
+
+        long durationMs = System.currentTimeMillis() - startTime;
+        log.info("operation=DEPENDENCY_REMOVE predecessorTaskId={} successorTaskId={} result=SUCCESS durationMs={}",
+                predecessorTaskId, successorTaskId, durationMs);
+        metrics.recordDependencyRemoved();
     }
 }

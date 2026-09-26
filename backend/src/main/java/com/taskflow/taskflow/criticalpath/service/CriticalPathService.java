@@ -102,6 +102,7 @@ public class CriticalPathService {
         log.info("Calculating critical path for project [{}] (tasks={}, dependencies={})",
                 projectId, tasks.size(), dependencies.size());
 
+        long startTime = System.currentTimeMillis();
         // 5. Execute pure CPM calculation
         CriticalPathResult result = calculator.calculate(inputs, graph);
 
@@ -119,6 +120,14 @@ public class CriticalPathService {
                         m.isCritical()
                 ))
                 .toList();
+
+        long projectDurationDays = (result.projectStartDate() != null && result.projectCompletionDate() != null)
+                ? java.time.temporal.ChronoUnit.DAYS.between(result.projectStartDate(), result.projectCompletionDate()) + 1
+                : 0;
+
+        long durationMs = System.currentTimeMillis() - startTime;
+        log.info("operation=CRITICAL_PATH_CALCULATION projectId={} taskCount={} criticalTaskCount={} criticalPathCount={} projectDurationDays={} durationMs={}",
+                projectId, tasks.size(), result.criticalTaskIds().size(), result.criticalPaths().size(), projectDurationDays, durationMs);
 
         return new CriticalPathResponse(
                 projectId,

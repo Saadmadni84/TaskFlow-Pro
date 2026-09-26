@@ -2,6 +2,7 @@ package com.taskflow.taskflow.dependency.readiness;
 
 import com.taskflow.taskflow.common.exception.ProjectNotFoundException;
 import com.taskflow.taskflow.common.exception.TaskNotFoundException;
+import com.taskflow.taskflow.common.metrics.TaskFlowMetrics;
 import com.taskflow.taskflow.dependency.graph.AffectedSubgraph;
 import com.taskflow.taskflow.dependency.graph.DependencyGraph;
 import com.taskflow.taskflow.dependency.graph.DependencyGraphBuilder;
@@ -14,6 +15,7 @@ import com.taskflow.taskflow.task.entity.TaskStatus;
 import com.taskflow.taskflow.task.repository.TaskRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,16 +28,6 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- * Dependency Readiness Engine responsible for deriving and propagating
- * READY / BLOCKED states across the DAG when prerequisite workflow states change.
- *
- * Guarantees:
- * 1. Dependency status is derived exclusively from prerequisite workflowStatus == DONE and prerequisite readiness.
- * 2. Downstream tasks are processed in strict topological order.
- * 3. Converging dependency paths evaluate shared successors exactly once without duplicate processing.
- * 4. Only tasks whose status actually changes are persisted.
- */
 @Service
 @Transactional(readOnly = true)
 public class DependencyReadinessService {
@@ -47,6 +39,24 @@ public class DependencyReadinessService {
     private final DependencyGraphBuilder graphBuilder;
     private final GraphTraversalService traversalService;
     private final TopologicalSortService topologicalSortService;
+    private final TaskFlowMetrics metrics;
+
+    @Autowired
+    public DependencyReadinessService(
+            TaskRepository taskRepository,
+            ProjectRepository projectRepository,
+            DependencyGraphBuilder graphBuilder,
+            GraphTraversalService traversalService,
+            TopologicalSortService topologicalSortService,
+            TaskFlowMetrics metrics
+    ) {
+        this.taskRepository = taskRepository;
+        this.projectRepository = projectRepository;
+        this.graphBuilder = graphBuilder;
+        this.traversalService = traversalService;
+        this.topologicalSortService = topologicalSortService;
+        this.metrics = metrics != null ? metrics : new TaskFlowMetrics(null);
+    }
 
     public DependencyReadinessService(
             TaskRepository taskRepository,
@@ -55,26 +65,11 @@ public class DependencyReadinessService {
             GraphTraversalService traversalService,
             TopologicalSortService topologicalSortService
     ) {
-        this.taskRepository = taskRepository;
-        this.projectRepository = projectRepository;
-        this.graphBuilder = graphBuilder;
-        this.traversalService = traversalService;
-        this.topologicalSortService = topologicalSortService;
+        this(taskRepository, projectRepository, graphBuilder, traversalService, topologicalSortService, new TaskFlowMetrics(null));
     }
 
     /**
      * Recalculates readiness for all downstream descendants affected by a change to rootTaskId.
-     * Core method specified in Section 13:
-     * 1. Load project graph.
-     * 2. Identify task.
-     * 3. Identify affected descendants.
-     * 4. Process affected tasks in topological order.
-     * 5. Evaluate each task's predecessors.
-     * 6. Set READY or BLOCKED.
-     * 7. Persist only changed states.
-     *
-     * @param rootTaskId the upstream task that changed
-     * @return list of tasks whose dependencyStatus was updated
      */
     @Transactional
     public List<Task> recalculateForTask(UUID rootTaskId) {
@@ -84,9 +79,6 @@ public class DependencyReadinessService {
     /**
      * Recalculates readiness for all downstream descendants of rootTaskId.
      * Invoked when rootTaskId transitions between DONE and non-DONE workflow states.
-     *
-     * @param rootTaskId the upstream task that changed
-     * @return list of tasks whose dependencyStatus was updated
      */
     @Transactional
     public List<Task> recalculateAffectedDescendants(UUID rootTaskId) {
@@ -107,9 +99,6 @@ public class DependencyReadinessService {
     /**
      * Recalculates readiness for targetTaskId and all its downstream descendants.
      * Invoked when a dependency edge is added or removed with targetTaskId as successor.
-     *
-     * @param targetTaskId the task whose prerequisites changed
-     * @return list of tasks whose dependencyStatus was updated
      */
     @Transactional
     public List<Task> recalculateTaskAndDescendants(UUID targetTaskId) {
@@ -128,9 +117,6 @@ public class DependencyReadinessService {
 
     /**
      * Recalculates readiness for all tasks in a project from scratch in full topological order.
-     *
-     * @param projectId the project to recalculate
-     * @return list of tasks whose dependencyStatus was updated
      */
     @Transactional
     public List<Task> recalculateForProject(UUID projectId) {
@@ -156,11 +142,15 @@ public class DependencyReadinessService {
             return List.of();
         }
 
+        long startTime = System.currentTimeMillis();
+
         // Single batch fetch of all project tasks to avoid N+1 queries
         Map<UUID, Task> taskMap = taskRepository.findByProjectId(projectId).stream()
                 .collect(Collectors.toMap(Task::getId, Function.identity()));
 
         List<Task> changedTasks = new ArrayList<>();
+        int readyCount = 0;
+        int blockedCount = 0;
 
         for (UUID taskId : taskIdsInOrder) {
             Task task = taskMap.get(taskId);
@@ -180,8 +170,13 @@ public class DependencyReadinessService {
                     .toList();
 
             DependencyStatus newStatus = ReadinessCalculator.calculateFromStates(predStates);
+            if (newStatus == DependencyStatus.READY) {
+                readyCount++;
+            } else {
+                blockedCount++;
+            }
+
             if (newStatus != task.getDependencyStatus()) {
-                log.debug("Task [{}] readiness changed from {} to {}", taskId, task.getDependencyStatus(), newStatus);
                 task.setDependencyStatus(newStatus);
                 changedTasks.add(task);
             }
@@ -190,6 +185,11 @@ public class DependencyReadinessService {
         if (!changedTasks.isEmpty()) {
             taskRepository.saveAll(changedTasks);
         }
+
+        long durationMs = System.currentTimeMillis() - startTime;
+        log.info("operation=DEPENDENCY_READINESS_RECALCULATION projectId={} affectedTaskCount={} changedTaskCount={} readyCount={} blockedCount={} durationMs={}",
+                projectId, taskIdsInOrder.size(), changedTasks.size(), readyCount, blockedCount, durationMs);
+        metrics.recordReadinessRecalculation(durationMs);
 
         return changedTasks;
     }

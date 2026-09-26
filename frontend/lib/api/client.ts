@@ -10,6 +10,7 @@ export class ApiClientError extends Error {
   public readonly code: string;
   public readonly details?: { field: string; message: string }[];
   public readonly path?: string;
+  public readonly requestId?: string;
 
   constructor(errorResponse: ApiErrorResponse) {
     super(errorResponse.message || 'An unexpected API error occurred');
@@ -18,7 +19,67 @@ export class ApiClientError extends Error {
     this.code = errorResponse.code;
     this.details = errorResponse.details;
     this.path = errorResponse.path;
+    this.requestId = errorResponse.requestId;
   }
+}
+
+/**
+ * Normalizes any error (ApiClientError, standard Error, string) into a user-facing
+ * message, machine-readable code, and correlation requestId for diagnostics.
+ */
+export function formatApiError(err: unknown): {
+  message: string;
+  code?: string;
+  requestId?: string;
+} {
+  if (err instanceof ApiClientError) {
+    let friendlyMessage = err.message;
+
+    switch (err.code) {
+      case 'CYCLE_DETECTED':
+      case 'DEPENDENCY_CYCLE':
+        friendlyMessage = 'This dependency would create a cycle, so it was not added.';
+        break;
+      case 'CONCURRENCY_CONFLICT':
+      case 'RESOURCE_VERSION_CONFLICT':
+        friendlyMessage = 'This task was changed elsewhere. Refresh and try again.';
+        break;
+      case 'VALIDATION_ERROR':
+        friendlyMessage = err.details?.length
+          ? `Validation error: ${err.details.map(d => d.message).join(', ')}`
+          : 'Please check the task details and try again.';
+        break;
+      case 'AI_DISABLED':
+      case 'AI_UNAVAILABLE':
+        friendlyMessage = 'AI suggestions are temporarily unavailable. You can add the dependency manually.';
+        break;
+      case 'RATE_LIMIT_EXCEEDED':
+        friendlyMessage = 'Rate limit reached. Please wait a moment before trying again.';
+        break;
+      case 'RESOURCE_NOT_FOUND':
+        friendlyMessage = err.message || 'The requested resource was not found.';
+        break;
+      case 'NETWORK_FAILURE':
+        friendlyMessage = 'Unable to connect to TaskFlow Pro backend. Check network connectivity.';
+        break;
+    }
+
+    return {
+      message: friendlyMessage,
+      code: err.code,
+      requestId: err.requestId,
+    };
+  }
+
+  if (err instanceof Error) {
+    return {
+      message: err.message || 'An unexpected error occurred.',
+    };
+  }
+
+  return {
+    message: typeof err === 'string' ? err : 'An unexpected error occurred.',
+  };
 }
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -53,9 +114,13 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
+    const headerRequestId = response.headers.get('X-Request-Id') || undefined;
     let errorData: ApiErrorResponse;
     try {
       errorData = await response.json();
+      if (!errorData.requestId && headerRequestId) {
+        errorData.requestId = headerRequestId;
+      }
     } catch {
       errorData = {
         timestamp: new Date().toISOString(),
@@ -63,6 +128,7 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
         code: 'HTTP_ERROR',
         message: `Request failed with status ${response.status}: ${response.statusText}`,
         path: cleanEndpoint,
+        requestId: headerRequestId,
       };
     }
     throw new ApiClientError(errorData);

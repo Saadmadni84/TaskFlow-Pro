@@ -15,7 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import com.taskflow.taskflow.common.metrics.TaskFlowMetrics;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -51,6 +51,26 @@ public class SchedulingService {
     private final GraphTraversalService traversalService;
     private final TopologicalSortService topologicalSortService;
     private final ScheduleCalculationService calculationService;
+    private final TaskFlowMetrics metrics;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SchedulingService(
+            TaskRepository taskRepository,
+            ProjectRepository projectRepository,
+            DependencyGraphBuilder graphBuilder,
+            GraphTraversalService traversalService,
+            TopologicalSortService topologicalSortService,
+            ScheduleCalculationService calculationService,
+            TaskFlowMetrics metrics
+    ) {
+        this.taskRepository = taskRepository;
+        this.projectRepository = projectRepository;
+        this.graphBuilder = graphBuilder;
+        this.traversalService = traversalService;
+        this.topologicalSortService = topologicalSortService;
+        this.calculationService = calculationService;
+        this.metrics = metrics != null ? metrics : new TaskFlowMetrics(null);
+    }
 
     public SchedulingService(
             TaskRepository taskRepository,
@@ -60,12 +80,8 @@ public class SchedulingService {
             TopologicalSortService topologicalSortService,
             ScheduleCalculationService calculationService
     ) {
-        this.taskRepository = taskRepository;
-        this.projectRepository = projectRepository;
-        this.graphBuilder = graphBuilder;
-        this.traversalService = traversalService;
-        this.topologicalSortService = topologicalSortService;
-        this.calculationService = calculationService;
+        this(taskRepository, projectRepository, graphBuilder, traversalService,
+                topologicalSortService, calculationService, new TaskFlowMetrics(null));
     }
 
     /**
@@ -79,13 +95,13 @@ public class SchedulingService {
      */
     @Transactional
     public Task updateTaskSchedule(Task task, LocalDate newPlannedStartDate, Integer newDurationDays) {
+        long startTime = System.currentTimeMillis();
         Objects.requireNonNull(task, "Task must not be null");
 
         UUID projectId = task.getProject().getId();
         DependencyGraph graph = graphBuilder.buildGraphForProject(projectId);
 
-        log.info("Updating schedule for task [{}]: new plannedStart={}, duration={}",
-                task.getId(), newPlannedStartDate, newDurationDays);
+        LocalDate oldStart = task.getScheduledStartDate();
 
         // 1. Update task's planned schedule
         task.setPlannedSchedule(newPlannedStartDate, newDurationDays);
@@ -115,12 +131,24 @@ public class SchedulingService {
 
         // 4. Find affected descendants and process in topological order
         AffectedSubgraph affected = traversalService.getAffectedSubgraph(graph, task.getId());
+        int affectedCount = 1;
         if (affected.hasAffectedTasks()) {
+            affectedCount += affected.getAffectedCount();
             List<Task> changedDescendants = evaluateSchedules(graph, affected.topologicalOrder(), taskMap);
             tasksToSave.addAll(changedDescendants);
         }
 
         taskRepository.saveAll(tasksToSave);
+
+        long shiftDays = (oldStart != null && task.getScheduledStartDate() != null)
+                ? java.time.temporal.ChronoUnit.DAYS.between(oldStart, task.getScheduledStartDate())
+                : 0;
+
+        long durationMs = System.currentTimeMillis() - startTime;
+        log.info("operation=SCHEDULE_PROPAGATION rootTaskId={} projectId={} affectedTaskCount={} changedTaskCount={} maxScheduleShiftDays={} durationMs={} result=SUCCESS",
+                task.getId(), projectId, affectedCount, tasksToSave.size(), Math.abs(shiftDays), durationMs);
+        metrics.recordSchedulePropagation(durationMs, true);
+
         return task;
     }
 

@@ -70,6 +70,7 @@ public class ScheduleImpactPreviewService {
      * @return side-effect-free preview containing current vs proposed schedules and impact explanations
      */
     public ScheduleImpactPreviewResponse calculatePreview(UUID taskId, SchedulePreviewRequest request) {
+        long startTime = System.currentTimeMillis();
         Objects.requireNonNull(taskId, "Task ID must not be null");
         if (request == null || request.plannedStartDate() == null) {
             throw new ValidationException("Proposed planned start date must not be null");
@@ -134,8 +135,9 @@ public class ScheduleImpactPreviewService {
                 maxDelayDays
         );
 
-        log.info("Schedule impact preview completed for taskId={}, affectedTaskCount={}, changedTaskCount={}, maxDelayDays={}",
-                taskId, affectedCount, changedCount, maxDelayDays);
+        long durationMs = System.currentTimeMillis() - startTime;
+        log.info("operation=SCHEDULE_PREVIEW rootTaskId={} projectId={} affectedTaskCount={} changedTaskCount={} maxScheduleShiftDays={} durationMs={}",
+                taskId, projectId, affectedCount, changedCount, maxDelayDays, durationMs);
 
         return new ScheduleImpactPreviewResponse(taskId, summary, impactList);
     }
