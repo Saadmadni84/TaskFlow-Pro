@@ -361,6 +361,7 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
               onNodeClick={onNodeClick}
               onPaneClick={onPaneClick}
               fitView
+              fitViewOptions={{ padding: 0.15 }}
               minZoom={0.2}
               maxZoom={2.0}
               proOptions={{ hideAttribution: true }}

@@ -191,10 +191,10 @@ export function useDependencyGraph(
     g.setDefaultEdgeLabel(() => ({}));
     g.setGraph({
       rankdir: layoutDirection,
-      nodesep: 40,
-      ranksep: 80,
-      marginx: 30,
-      marginy: 30,
+      nodesep: layoutDirection === 'LR' ? 35 : 45,
+      ranksep: layoutDirection === 'LR' ? 60 : 50,
+      marginx: 20,
+      marginy: 20,
     });
 
     // Add nodes to dagre
