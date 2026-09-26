@@ -1,9 +1,13 @@
 import { ApiErrorResponse } from '@/types';
 
-const BASE_URL =
+const rawBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   'http://localhost:8080/api';
+
+const BASE_URL = rawBaseUrl.endsWith('/api')
+  ? rawBaseUrl
+  : `${rawBaseUrl.replace(/\/+$/, '')}/api`;
 
 export class ApiClientError extends Error {
   public readonly status: number;

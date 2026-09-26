@@ -78,38 +78,38 @@ export default function DomainModelPage() {
       <Card className="space-y-4">
         <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
           <div>
-            <h2 className="text-sm font-medium text-zinc-200">Relational Database Invariants</h2>
-            <p className="text-xs text-zinc-400">Managed with repeatable Flyway SQL migrations</p>
+            <h2 className="text-sm font-semibold text-zinc-100">Relational Schema & Concurrency Invariants</h2>
+            <p className="text-xs text-zinc-400">Enforced via Flyway SQL migrations and JPA/Hibernate domain mapping</p>
           </div>
-          <span className="text-xs font-mono text-zinc-500">PostgreSQL 16</span>
+          <span className="text-xs font-mono text-zinc-500">PostgreSQL 16 + JPA</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
           <div className="p-3.5 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
             <span className="text-xs text-zinc-300 font-medium">UUID Primary Keys</span>
             <p className="text-[11px] text-zinc-400 leading-normal">
-              Randomly distributed UUIDs prevent enumeration attacks and simplify distributed replication.
+              PostgreSQL <code className="text-zinc-300">UUID PRIMARY KEY</code> avoids enumeration attacks and simplifies cross-environment identification.
             </p>
           </div>
 
           <div className="p-3.5 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
-            <span className="text-xs text-zinc-300 font-medium">Optimistic Locking</span>
+            <span className="text-xs text-zinc-300 font-medium">JPA Optimistic Locking</span>
             <p className="text-[11px] text-zinc-400 leading-normal">
-              <code className="text-zinc-300">@Version</code> protects task state from concurrent overwrite collisions and race conditions.
+              JPA/Hibernate <code className="text-zinc-300">@Version</code> on the database <code className="text-zinc-300">version BIGINT</code> column prevents lost updates and concurrent overwrite collisions.
             </p>
           </div>
 
           <div className="p-3.5 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
-            <span className="text-xs text-zinc-300 font-medium">Self-Loop Prevention</span>
+            <span className="text-xs text-zinc-300 font-medium">Database Constraints</span>
             <p className="text-[11px] text-zinc-400 leading-normal">
-              Check constraint ensures <code className="text-zinc-300">predecessor_id != successor_id</code> at the database level.
+              PostgreSQL CHECK constraint ensures <code className="text-zinc-300">predecessor_task_id &lt;&gt; successor_task_id</code>, and UNIQUE constraint prevents duplicate edges.
             </p>
           </div>
 
           <div className="p-3.5 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
             <span className="text-xs text-zinc-300 font-medium">Cascade Protection</span>
             <p className="text-[11px] text-zinc-400 leading-normal">
-              Deleting a task cleanly removes its incident dependency edges transactionally.
+              Foreign key <code className="text-zinc-300">ON DELETE CASCADE</code> guarantees deleting a task transactionally removes all incident dependency edges.
             </p>
           </div>
         </div>

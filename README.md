@@ -879,8 +879,8 @@ Lightweight application metrics registered in Spring Boot's `MeterRegistry` usin
 
 ## Implemented Phases
 
-- [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
-- [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
+- [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 frontend, containerized PostgreSQL 16 via Docker Compose, Flyway migration baseline, strict separation of derived dependency states (`READY`, `BLOCKED`) from workflow states (`BACKLOG`, `IN_PROGRESS`, `REVIEW`, `DONE`), and centralized RFC-7807 error handling.
+- [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), foreign keys with `ON DELETE CASCADE`, self-loop checks, JPA/Hibernate optimistic locking via `@Version` on a `BIGINT` column, project isolation validation, and persistence test suite.
 - [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
 - [x] **Phase 4**: Dependency Readiness Engine (evaluating prerequisite completion, derived `READY`/`BLOCKED` status propagation in topological order, multi-level unlock, downstream rollback on task reopen, converging graph handling, and edge addition/removal recalculation).
 - [x] **Phase 5**: Dependency-Aware Scheduling Engine (constraint-based schedule calculation, non-compounding downstream date propagation, topological schedule recalculation, duration preservation, recomputable baseline schedules, and transactional persistence).

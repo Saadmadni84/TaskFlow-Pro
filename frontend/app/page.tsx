@@ -79,54 +79,113 @@ export default function HomePage() {
         </Card>
       </div>
 
-      {/* Semantic State Foundations */}
-      <Card className="space-y-4">
+      {/* Explicit State Taxonomy: Dependency vs Workflow */}
+      <Card className="space-y-6">
         <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
           <div>
-            <h2 className="text-sm font-medium text-zinc-200">Semantic Dependency States</h2>
-            <p className="text-xs text-zinc-400">Strictly defined visual states mapped to domain rules</p>
+            <h2 className="text-sm font-semibold text-zinc-100">Domain State Taxonomy</h2>
+            <p className="text-xs text-zinc-400">Strict architectural separation between derived dependency readiness and user workflow progression</p>
           </div>
-          <span className="text-xs font-mono text-zinc-500">Design System</span>
+          <span className="text-xs font-mono text-zinc-500">Phase 1 Foundations</span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-          <div className="p-3 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-300 font-medium">Ready</span>
-              <Badge variant="ready">Ready</Badge>
-            </div>
-            <p className="text-[11px] text-zinc-400 leading-normal">
-              All predecessor dependencies satisfied. Task is eligible for execution.
-            </p>
+        {/* 1. Dependency States */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-emerald-400">
+              Dependency State (Derived & System-Controlled)
+            </h3>
+            <span className="text-[10px] font-mono text-zinc-500">Authoritative DAG Engine</span>
           </div>
+          <p className="text-xs text-zinc-400">
+            Computed strictly on the backend from predecessor workflow completion. The frontend never calculates readiness.
+          </p>
 
-          <div className="p-3 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-300 font-medium">Blocked</span>
-              <Badge variant="blocked">Blocked</Badge>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-950/20 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-emerald-300 font-semibold font-mono">READY</span>
+                <Badge variant="ready">Ready</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-normal">
+                All predecessor dependencies satisfied (<code className="text-emerald-400">workflowStatus == DONE</code>). Task is unblocked and eligible for execution.
+              </p>
             </div>
-            <p className="text-[11px] text-zinc-400 leading-normal">
-              One or more upstream dependencies pending completion.
-            </p>
+
+            <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-950/20 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-rose-300 font-semibold font-mono">BLOCKED</span>
+                <Badge variant="blocked">Blocked</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-normal">
+                One or more upstream prerequisite dependencies pending completion. Task execution cannot begin.
+              </p>
+            </div>
           </div>
+        </div>
 
-          <div className="p-3 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-300 font-medium">Warning</span>
-              <Badge variant="warning">Warning</Badge>
-            </div>
-            <p className="text-[11px] text-zinc-400 leading-normal">
-              Schedule slip or impending deadline conflict requiring attention.
-            </p>
+        {/* 2. Workflow States */}
+        <div className="space-y-2 pt-2 border-t border-zinc-800/80">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-sky-400">
+              Workflow State (User-Controlled Lifecycle)
+            </h3>
+            <span className="text-[10px] font-mono text-zinc-500">Production Kanban Columns</span>
           </div>
+          <p className="text-xs text-zinc-400">
+            Represents user execution lifecycle across Kanban board columns.
+          </p>
 
-          <div className="p-3 rounded border border-zinc-800/60 bg-zinc-950/40 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-300 font-medium">Neutral</span>
-              <Badge variant="neutral">Backlog</Badge>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+            <div className="p-3 rounded-lg border border-zinc-800/60 bg-zinc-950/40 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-200 font-medium font-mono">BACKLOG</span>
+                <Badge variant="neutral">Backlog</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-normal">
+                Initial queued state awaiting prioritization and sprint planning.
+              </p>
             </div>
-            <p className="text-[11px] text-zinc-400 leading-normal">
-              Unscheduled or backlog state awaiting dependency definition.
+
+            <div className="p-3 rounded-lg border border-blue-500/30 bg-blue-950/20 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-blue-300 font-medium font-mono">IN_PROGRESS</span>
+                <Badge variant="ready">In Progress</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-normal">
+                Actively being worked on by engineers or automation pipelines.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-lg border border-purple-500/30 bg-purple-950/20 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-purple-300 font-medium font-mono">REVIEW</span>
+                <Badge variant="warning">Review</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-normal">
+                Implementation complete; awaiting QA, code review, or sign-off.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-950/20 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-emerald-300 font-medium font-mono">DONE</span>
+                <Badge variant="ready">Done</Badge>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-normal">
+                Finished; satisfies downstream prerequisite constraints in the DAG.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Visual Scheduling Indicator Note */}
+        <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-950/20 flex items-start gap-3 text-xs">
+          <Badge variant="warning" className="shrink-0 mt-0.5">Warning</Badge>
+          <div className="space-y-0.5 text-zinc-300">
+            <span className="font-semibold text-amber-300">Visual Scheduling Warning (UI Indicator Only)</span>
+            <p className="text-[11px] text-zinc-400">
+              Visual warnings highlight schedule slips, impending deadline conflicts, or critical-path bottlenecks. Warning is purely a visual UI affordance, <strong>not</strong> a domain dependency state.
             </p>
           </div>
         </div>
