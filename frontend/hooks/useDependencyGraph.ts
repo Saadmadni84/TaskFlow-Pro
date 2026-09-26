@@ -6,6 +6,9 @@ import { Node, Edge, MarkerType, Position } from '@xyflow/react';
 import { DependencyGraph, DependencyGraphNode, DependencyGraphEdge } from '@/types';
 import { dependencyGraphApi, dependencyApi } from '@/lib/api';
 
+import { criticalPathApi } from '@/lib/api/criticalPath';
+import { CriticalPathResponse } from '@/types';
+
 export type LayoutDirection = 'LR' | 'TB';
 export type HighlightMode = 'DIRECT' | 'ALL';
 
@@ -17,19 +20,31 @@ export interface GraphTaskNodeData extends Record<string, unknown> {
   isAncestor: boolean;
   isDescendant: boolean;
   isCritical?: boolean;
+  isCriticalMode?: boolean;
 }
 
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 100;
 
-export function useDependencyGraph(projectId?: string | null) {
+export interface UseDependencyGraphOptions {
+  initialCriticalMode?: boolean;
+  initialSelectedTaskId?: string | null;
+}
+
+export function useDependencyGraph(
+  projectId?: string | null,
+  options?: UseDependencyGraphOptions
+) {
   const [graph, setGraph] = useState<DependencyGraph | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(options?.initialSelectedTaskId || null);
   const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>('LR');
   const [highlightMode, setHighlightMode] = useState<HighlightMode>('DIRECT');
+  const [isCriticalMode, setIsCriticalMode] = useState<boolean>(options?.initialCriticalMode ?? false);
+  const [criticalPathData, setCriticalPathData] = useState<CriticalPathResponse | null>(null);
+  const [loadingCriticalPath, setLoadingCriticalPath] = useState<boolean>(false);
 
   // Load project graph from authoritative backend endpoint
   const fetchGraph = useCallback(async () => {
@@ -52,9 +67,48 @@ export function useDependencyGraph(projectId?: string | null) {
     }
   }, [projectId]);
 
+  const fetchCriticalPath = useCallback(async () => {
+    if (!projectId) {
+      setCriticalPathData(null);
+      return;
+    }
+    setLoadingCriticalPath(true);
+    try {
+      const data = await criticalPathApi.getCriticalPath(projectId);
+      setCriticalPathData(data);
+    } catch {
+      // Non-fatal for general graph visualization
+    } finally {
+      setLoadingCriticalPath(false);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     fetchGraph();
   }, [fetchGraph]);
+
+  useEffect(() => {
+    if (isCriticalMode) {
+      fetchCriticalPath();
+    }
+  }, [isCriticalMode, fetchCriticalPath]);
+
+  // Sets of critical tasks and critical edges for high-performance O(1) checks
+  const criticalTaskSet = useMemo(() => {
+    if (!isCriticalMode || !criticalPathData) return new Set<string>();
+    return new Set(criticalPathData.criticalTaskIds);
+  }, [isCriticalMode, criticalPathData]);
+
+  const criticalEdgeSet = useMemo(() => {
+    if (!isCriticalMode || !criticalPathData) return new Set<string>();
+    const set = new Set<string>();
+    for (const path of criticalPathData.criticalPaths) {
+      for (let i = 0; i < path.length - 1; i++) {
+        set.add(`${path[i]}->${path[i + 1]}`);
+      }
+    }
+    return set;
+  }, [isCriticalMode, criticalPathData]);
 
   // Compute direct predecessors, direct successors, ancestors, and descendants
   const {
@@ -165,6 +219,7 @@ export function useDependencyGraph(projectId?: string | null) {
       const isSucc = directSuccessors.has(node.id);
       const isAnc = allAncestors.has(node.id);
       const isDesc = allDescendants.has(node.id);
+      const isCrit = criticalTaskSet.has(node.id);
 
       return {
         id: node.id,
@@ -182,6 +237,8 @@ export function useDependencyGraph(projectId?: string | null) {
           isSuccessor: isSucc,
           isAncestor: highlightMode === 'ALL' && isAnc,
           isDescendant: highlightMode === 'ALL' && isDesc,
+          isCritical: isCrit,
+          isCriticalMode,
         },
       };
     });
@@ -196,11 +253,23 @@ export function useDependencyGraph(projectId?: string | null) {
         (allAncestors.has(edge.predecessorTaskId) && edge.successorTaskId === selectedTaskId) ||
         (edge.predecessorTaskId === selectedTaskId && allDescendants.has(edge.successorTaskId));
 
+      const isCriticalEdge = isCriticalMode && criticalEdgeSet.has(`${edge.predecessorTaskId}->${edge.successorTaskId}`);
+
       let strokeColor = '#3f3f46'; // zinc-700 default
       let strokeWidth = 1.5;
       let isAnimated = false;
 
-      if (isOutboundFromSelected) {
+      if (isCriticalMode) {
+        if (isCriticalEdge) {
+          strokeColor = '#f59e0b'; // amber-500 critical edge
+          strokeWidth = 3;
+          isAnimated = true;
+        } else {
+          strokeColor = '#27272a'; // dimmed zinc-800 for non-critical edges
+          strokeWidth = 1;
+          isAnimated = false;
+        }
+      } else if (isOutboundFromSelected) {
         strokeColor = '#38bdf8'; // sky-400 (successor path)
         strokeWidth = 2.5;
         isAnimated = true;
@@ -226,8 +295,8 @@ export function useDependencyGraph(projectId?: string | null) {
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: strokeColor,
-          width: 16,
-          height: 16,
+          width: isCriticalEdge ? 20 : 16,
+          height: isCriticalEdge ? 20 : 16,
         },
       };
     });
@@ -242,6 +311,9 @@ export function useDependencyGraph(projectId?: string | null) {
     allAncestors,
     allDescendants,
     highlightMode,
+    isCriticalMode,
+    criticalTaskSet,
+    criticalEdgeSet,
   ]);
 
   // Selected task object
@@ -329,6 +401,10 @@ export function useDependencyGraph(projectId?: string | null) {
     setLayoutDirection,
     highlightMode,
     setHighlightMode,
+    isCriticalMode,
+    setIsCriticalMode,
+    criticalPathData,
+    loadingCriticalPath,
     refreshGraph: fetchGraph,
     addDependency,
     removeDependency,

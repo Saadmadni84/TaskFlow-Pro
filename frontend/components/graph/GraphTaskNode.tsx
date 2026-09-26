@@ -29,19 +29,30 @@ function getDependencyBadge(status: DependencyStatus) {
 }
 
 export const GraphTaskNode = memo(({ data, sourcePosition = Position.Right, targetPosition = Position.Left }: NodeProps<TaskNodeType>) => {
-  const { task, isSelected, isPredecessor, isSuccessor, isAncestor, isDescendant } = data;
+  const { task, isSelected, isPredecessor, isSuccessor, isAncestor, isDescendant, isCritical, isCriticalMode } = data;
   const wf = getWorkflowBadge(task.workflowStatus);
   const dep = getDependencyBadge(task.dependencyStatus);
 
-  // Border & Glow styling based on topological relationship
+  // Border & Glow styling based on topological relationship & Critical Path Mode
   let borderStyle = 'border-zinc-800/80 hover:border-zinc-700';
   let ringStyle = '';
+  let opacityStyle = '';
   let badgeLabel: string | null = null;
   let badgeColor = '';
 
   if (isSelected) {
     borderStyle = 'border-emerald-500';
     ringStyle = 'ring-2 ring-emerald-500/30 shadow-lg shadow-emerald-500/10';
+  } else if (isCriticalMode) {
+    if (isCritical) {
+      borderStyle = 'border-amber-400 bg-zinc-900';
+      ringStyle = 'ring-2 ring-amber-400/40 shadow-lg shadow-amber-400/20';
+      badgeLabel = 'CRITICAL (0 Slack)';
+      badgeColor = 'bg-amber-950/90 text-amber-300 border-amber-500/40 font-semibold';
+    } else {
+      borderStyle = 'border-zinc-800/60';
+      opacityStyle = 'opacity-40 hover:opacity-100 transition-opacity';
+    }
   } else if (isPredecessor) {
     borderStyle = 'border-amber-400';
     ringStyle = 'ring-2 ring-amber-400/30 shadow-md shadow-amber-400/10';
@@ -68,7 +79,7 @@ export const GraphTaskNode = memo(({ data, sourcePosition = Position.Right, targ
       tabIndex={0}
       aria-label={`Task: ${task.title}, Status: ${task.workflowStatus}, Readiness: ${task.dependencyStatus}`}
       aria-pressed={isSelected}
-      className={`relative w-[240px] rounded-xl bg-zinc-900/90 backdrop-blur-sm p-3.5 border transition-all duration-200 select-none cursor-pointer ${borderStyle} ${ringStyle}`}
+      className={`relative w-[240px] rounded-xl bg-zinc-900/90 backdrop-blur-sm p-3.5 border transition-all duration-200 select-none cursor-pointer ${borderStyle} ${ringStyle} ${opacityStyle}`}
     >
       {/* Target handle (inbound from prerequisites) */}
       <Handle

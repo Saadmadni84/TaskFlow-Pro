@@ -19,11 +19,18 @@ import { DependencyGraphView } from '@/components/graph/DependencyGraphView';
 interface KanbanWorkspaceProps {
   initialProjectId?: string;
   initialView?: 'KANBAN' | 'GRAPH';
+  initialCriticalMode?: boolean;
+  initialSelectedTaskId?: string | null;
 }
 
 type FilterState = 'ALL' | 'READY' | 'BLOCKED';
 
-export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProjectId, initialView = 'KANBAN' }) => {
+export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({
+  initialProjectId,
+  initialView = 'KANBAN',
+  initialCriticalMode = false,
+  initialSelectedTaskId = null,
+}) => {
   const [activeView, setActiveView] = useState<'KANBAN' | 'GRAPH'>(initialView);
   // 1. Projects state
   const {
@@ -358,6 +365,8 @@ export const KanbanWorkspace: React.FC<KanbanWorkspaceProps> = ({ initialProject
       ) : activeView === 'GRAPH' ? (
         <DependencyGraphView
           projectId={selectedProjectId}
+          initialCriticalMode={initialCriticalMode}
+          initialSelectedTaskId={initialSelectedTaskId}
           onNavigateToKanban={(taskId) => {
             setActiveView('KANBAN');
             const found = tasks.find((t) => t.id === taskId);

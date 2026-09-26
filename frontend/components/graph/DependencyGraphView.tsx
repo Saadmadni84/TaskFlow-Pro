@@ -23,6 +23,8 @@ interface DependencyGraphViewProps {
   projectId?: string | null;
   onNavigateToKanban?: (taskId: string) => void;
   onCreateTask?: () => void;
+  initialCriticalMode?: boolean;
+  initialSelectedTaskId?: string | null;
 }
 
 const nodeTypes: NodeTypes = {
@@ -33,6 +35,8 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
   projectId,
   onNavigateToKanban,
   onCreateTask,
+  initialCriticalMode = false,
+  initialSelectedTaskId = null,
 }) => {
   const {
     graph,
@@ -51,10 +55,16 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
     setLayoutDirection,
     highlightMode,
     setHighlightMode,
+    isCriticalMode,
+    setIsCriticalMode,
+    criticalPathData,
     refreshGraph,
     addDependency,
     removeDependency,
-  } = useDependencyGraph(projectId);
+  } = useDependencyGraph(projectId, {
+    initialCriticalMode,
+    initialSelectedTaskId,
+  });
 
   // Accessible Text Alternative View toggle
   const [isListView, setIsListView] = useState(false);
@@ -194,6 +204,12 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
             <span className="w-2 h-2 rounded-full bg-zinc-500" />
             <span>{graph.edges.length} Dependencies</span>
           </div>
+          {isCriticalMode && criticalPathData && (
+            <div className="flex items-center gap-1.5 text-amber-400 font-medium pl-3 border-l border-zinc-800">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span>{criticalPathData.criticalTaskIds.length} Critical ({criticalPathData.criticalPaths.length} path{criticalPathData.criticalPaths.length !== 1 ? 's' : ''})</span>
+            </div>
+          )}
           <div className="hidden sm:flex items-center gap-3 pl-3 border-l border-zinc-800 text-[11px] text-zinc-400">
             <span className="flex items-center gap-1">
               <span className="w-2 h-0.5 bg-amber-400 inline-block" /> Prerequisites
@@ -206,6 +222,25 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
 
         {/* Right Controls: View Settings */}
         <div className="flex items-center gap-2">
+          {/* Critical Path Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setIsCriticalMode(!isCriticalMode)}
+            title="Toggle Critical Path Mode (highlight zero-slack bottlenecks)"
+            className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-all flex items-center gap-1.5 ${
+              isCriticalMode
+                ? 'bg-amber-950/80 text-amber-300 border-amber-500/50 font-semibold shadow-sm shadow-amber-500/10'
+                : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                isCriticalMode ? 'bg-amber-400 animate-pulse' : 'bg-zinc-500'
+              }`}
+            />
+            <span>{isCriticalMode ? 'Critical Path: ON' : 'Highlight Critical Path'}</span>
+          </button>
+
           {/* Direction toggle */}
           <div className="flex rounded-lg bg-zinc-950 p-0.5 border border-zinc-800 text-[11px] font-mono">
             <button

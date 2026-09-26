@@ -566,6 +566,7 @@ A (3d)│             ├──> D (4d)
    - Critical tasks: `[A, B, D]`
    - Critical path: `["A", "B", "D"]` (duration 3 + 5 + 4 = 12 days)
    - Sub-path `A -> C -> D` has 3 days of float/slack and is non-critical.
+   - **No Compounding Delays on Converging Paths**: Notice that the CPM engine evaluates the earliest constraint of D as `max(EF(B) + 1, EF(C) + 1)`. It does *not* sum the durations of B and C into D merely because both converge into D. Only the longest predecessor constraint determines D's timing, preventing artificial double-counting.
 
 ### 5. Multiple Critical Paths & Disjoint Subgraphs
 - If parallel branches share the same schedule-determining duration (e.g. `duration(B) == duration(C)`), **all critical sequences are preserved and returned** (e.g., `[[A, B, D], [A, C, D]]`).
@@ -576,6 +577,16 @@ A (3d)│             ├──> D (4d)
 - **Time Complexity**: `O(V + E)` for topological sorting, forward pass, backward pass, and slack calculation. Path reconstruction is bounded by `O(K * V)` where `K` is the number of critical paths.
 - **Space Complexity**: `O(V + E)` in memory.
 - **Side-Effect Free**: Analytical only. Calling `GET /api/projects/{projectId}/critical-path` performs zero database writes, does not increment entity versions, and leaves task schedules intact.
+
+### 7. Interactive CPM Workspace & Visual DAG Integration
+The web application provides a comprehensive **Critical Path Analysis Dashboard** at `/critical-path`:
+- **Project Metrics**: Real-time display of Project Duration, Project Finish Date, Critical Task Count, and Parallel Critical Paths Count.
+- **Critical Chains Sequence**: Visual representation of each critical path sequence ($Task_1 \rightarrow Task_2 \rightarrow \dots \rightarrow Task_n$) with clickable interactive task pills.
+- **Task Timing & Slack Breakdown Table**: Horizontally scrollable table displaying Earliest Start (ES), Earliest Finish (EF), Latest Start (LS), Latest Finish (LF), Duration, Total Float (Slack), and `CRITICAL` vs `FLOAT` badges.
+- **Selected Task Detail Callout**: Displays mathematically accurate scheduling flexibility statements:
+  - Critical tasks: *"This task has 0 days of total float. Any delay directly delays project delivery."*
+  - Float tasks: *"This task can move by up to X days without changing project completion date, assuming other constraints remain unchanged."*
+- **Visual DAG Graph Highlight Mode**: Toggle `[ Highlight Critical Path ]` on `/graph` to emphasize critical nodes with amber borders and glow, animate critical connecting edges, and dim non-critical tasks to 40% secondary opacity.
 
 ## Frontend
 

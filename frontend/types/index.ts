@@ -162,8 +162,11 @@ export interface TaskMetrics {
 
 export interface CriticalPathResponse {
   projectId: string;
-  projectStartDate: string;
-  projectCompletionDate: string;
+  projectStartDate: string | null;
+  projectCompletionDate: string | null;
+  projectDurationDays?: number;
+  criticalTaskCount?: number;
+  criticalPathCount?: number;
   criticalTaskIds: string[];
   criticalPaths: string[][];
   tasks: TaskMetrics[];
