@@ -405,11 +405,103 @@ Semantic state styling conveys workflow states:
 - **Warning**: Amber badge for scheduling conflicts or impending deadline issues.
 - **Neutral**: Zinc badge for backlog or unscheduled items.
 
-## Database
+## Database & Migrations
 
-PostgreSQL 16 is managed using Flyway migrations located in `backend/src/main/resources/db/migration/`.
+PostgreSQL 16 is managed using Flyway migrations located in `backend/src/main/resources/db/migration/`:
 - `V1__init.sql`: Sets up the initial database schema baseline.
-- Future schema migrations (`V2__...`, `V3__...`) will introduce task and dependency tables in upcoming phases.
+- `V2__create_core_domain_tables.sql`: Core relational tables (`projects`, `tasks`, `task_dependencies`), primary/foreign keys with `ON DELETE CASCADE`, self-loop checks (`CHECK (predecessor_task_id <> successor_task_id)`), and composite indexes.
+- `V3__add_task_schedule_baseline.sql`: Scheduling baseline columns (`planned_start_date`, `scheduled_start_date`, `scheduled_due_date`, `duration_days`).
+- `V4__seed_demo_data.sql`: Seed dataset defining realistic multi-tier DAG workflows with converging paths.
+- `V5__seed_realistic_showcase_demo.sql`: Complete production platform showcase project featuring parallel branches, critical bottlenecks, and independent tasks.
+
+## Seed & Demo Instructions
+
+TaskFlow Pro includes automated, deterministic seed data via Flyway migrations `V4` and `V5`:
+1. When starting the database and backend with `docker compose up -d postgres` and `./mvnw spring-boot:run`, Flyway automatically applies migrations and seeds the database.
+2. The primary demo project is **"TaskFlow Pro Core Platform"** (`id: a0000000-0000-0000-0000-000000000001`):
+   - **Converging Dependencies**: Requirements Analysis (`June 1 → June 3`) $\rightarrow$ Backend Development (`June 4 → June 8`) and Frontend Dashboard (`June 4 → June 6`) $\rightarrow$ Converging Integration Task (`June 9 → June 12`).
+   - **Critical Path Bottlenecks**: Long-running paths demonstrate zero float/slack.
+   - **Independent Tasks**: Disaster Recovery Runbook operates without dependencies to verify disconnected component handling.
+3. Access the demo in your browser at `http://localhost:3000`:
+   - Open `/kanban` to view the 4-column production board and drag/update tasks.
+   - Open `/graph` to explore the interactive visual DAG canvas with upstream/downstream ancestor tracing.
+   - Open `/scheduling` to test topological date propagation.
+   - Open `/impact-preview` to simulate schedule shifts side-effect-free.
+   - Open `/critical-path` to inspect forward/backward pass CPM slack calculations.
+   - Open `/ai-suggestions` to generate LLM dependency recommendations and explicitly accept them.
+
+## Key Assumptions
+
+1. **Deterministic Single Source of Truth**: The Spring Boot backend domain layer is the single authority for graph validation, cycle detection, readiness states, and scheduling. The React frontend is strictly a visualization and command-dispatching interface.
+2. **Inclusive Calendar Day Semantics**: All date math operates on inclusive calendar day boundaries:
+   $$\text{durationDays} = \text{scheduledDueDate} - \text{scheduledStartDate} + 1$$
+   $$\text{scheduledDueDate} = \text{scheduledStartDate} + \text{durationDays} - 1$$
+3. **Strict Project Isolation**: Tasks and dependencies exist solely within the boundary of a single `Project`. Cross-project dependencies are explicitly prohibited by relational constraints and domain validators.
+4. **Separation of Workflow and Readiness**:
+   - `workflowStatus` (`BACKLOG`, `IN_PROGRESS`, `REVIEW`, `DONE`) is controlled by the user.
+   - `dependencyStatus` (`READY`, `BLOCKED`) is derived exclusively by the graph engine from prerequisite completion (`workflowStatus == DONE`).
+5. **Non-Compounding Delay Invariant**: Delays across parallel branches do not sum up; downstream tasks wait only for the latest predecessor to finish ($\max(\text{predDue} + 1)$).
+6. **Human-in-the-Loop AI**: AI suggestions are purely advisory. No graph edge is created without explicit human review and authoritative backend DAG validation.
+
+## Limitations
+
+1. **Discrete Day Granularity**: Scheduling calculations operate at the day granularity level. Sub-hour or minute-based scheduling (e.g. shift work or millisecond cron triggers) is out of scope.
+2. **Project Boundary Scope**: Task DAGs cannot span multiple projects. Each project maintains its own isolated dependency graph.
+3. **No Automatic AI Mutation**: The AI cannot autonomously modify existing tasks, alter schedules, or delete dependencies. All mutations require user confirmation.
+4. **In-Memory Subgraph Evaluation**: Graph traversal and CPM calculations are performed in-memory on the loaded project subgraph ($O(V + E)$). For extreme graphs exceeding 50,000 nodes in a single project, distributed graph processing (e.g., GraphX) would be required.
+
+## API Overview
+
+All endpoints are prefixed with `/api` and return standardized JSON responses:
+
+### Projects (`/api/projects`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects` | List all projects |
+| `POST` | `/api/projects` | Create a new project |
+| `GET` | `/api/projects/{id}` | Get project details |
+| `DELETE` | `/api/projects/{id}` | Delete a project and its tasks/dependencies |
+
+### Tasks (`/api/tasks`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/tasks/project/{projectId}` | List all tasks in a project with derived readiness and schedules |
+| `POST` | `/api/tasks` | Create a new task (auto-calculates readiness and schedule) |
+| `GET` | `/api/tasks/{id}` | Get task details |
+| `PUT` | `/api/tasks/{id}` | Update task details, workflow status, or planned dates |
+| `DELETE` | `/api/tasks/{id}` | Delete task and cascade delete associated dependencies |
+
+### Dependencies (`/api/dependencies`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/dependencies/project/{projectId}` | List all directed dependency edges in a project |
+| `POST` | `/api/dependencies` | Create directed dependency (enforces cycle detection, project match, non-self) |
+| `DELETE` | `/api/dependencies/{predecessorId}/{successorId}` | Remove dependency edge and recalculate downstream readiness/schedules |
+| `GET` | `/api/dependencies/affected-subgraph/{taskId}` | Get topologically sorted list of downstream affected tasks |
+
+### Scheduling & Impact Simulation
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/tasks/{taskId}/schedule/preview` | Deterministic, side-effect-free schedule impact simulation |
+| `PUT` | `/api/tasks/{taskId}` | Authoritative schedule update with topological downstream propagation |
+
+### AI Dependency Suggestions (`/api`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/tasks/{taskId}/dependency-suggestions` | Query configured LLM/provider for candidate dependencies |
+| `POST` | `/api/dependency-suggestions/accept` | Explicitly accept AI suggestion, validating and persisting via DAG engine |
+
+### Critical Path Analysis & Graph Inspection
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects/{projectId}/critical-path` | Authoritative CPM analysis (early/late dates, slack, critical paths) |
+| `GET` | `/api/projects/{projectId}/dependency-graph` | Full graph topology with adjacency lists, roots, and leaves |
+
+### Diagnostics & Health
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/actuator/health` | Spring Boot health probe |
+| `GET` | `/actuator/metrics` | Micrometer metrics for requests, DAG operations, and timings |
 
 ## Environment Variables
 
