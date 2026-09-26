@@ -24,9 +24,14 @@ import java.util.UUID;
 public class DependencySuggestionController {
 
     private final DependencySuggestionService suggestionService;
+    private final com.taskflow.taskflow.ai.ratelimit.AiRateLimiter rateLimiter;
 
-    public DependencySuggestionController(DependencySuggestionService suggestionService) {
+    public DependencySuggestionController(
+            DependencySuggestionService suggestionService,
+            com.taskflow.taskflow.ai.ratelimit.AiRateLimiter rateLimiter
+    ) {
         this.suggestionService = suggestionService;
+        this.rateLimiter = rateLimiter;
     }
 
     /**
@@ -35,13 +40,17 @@ public class DependencySuggestionController {
      *
      * @param taskId target task to analyze
      * @param limit optional maximum number of suggestions to return
+     * @param servletRequest HTTP request to extract remote client address
      * @return candidate dependency suggestions
      */
     @PostMapping("/tasks/{taskId}/dependency-suggestions")
     public ResponseEntity<DependencySuggestionResponse> generateSuggestions(
             @PathVariable UUID taskId,
-            @RequestParam(required = false) Integer limit
+            @RequestParam(required = false) Integer limit,
+            jakarta.servlet.http.HttpServletRequest servletRequest
     ) {
+        String clientKey = servletRequest.getRemoteAddr() != null ? servletRequest.getRemoteAddr() : "default-client";
+        rateLimiter.checkLimit(clientKey);
         DependencySuggestionResponse response = suggestionService.generateSuggestions(taskId, limit);
         return ResponseEntity.ok(response);
     }

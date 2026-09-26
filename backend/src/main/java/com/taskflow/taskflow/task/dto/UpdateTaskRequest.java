@@ -16,6 +16,7 @@ public record UpdateTaskRequest(
         @Size(max = 255, message = "Task title must not exceed 255 characters")
         String title,
 
+        @Size(max = 4000, message = "Task description must not exceed 4000 characters")
         String description,
 
         TaskStatus workflowStatus,
@@ -27,6 +28,7 @@ public record UpdateTaskRequest(
         LocalDate dueDate,
 
         @Min(value = 0, message = "Duration days cannot be negative")
+        @jakarta.validation.constraints.Max(value = 3650, message = "Duration days cannot exceed 3650")
         Integer durationDays
 ) {
     public UpdateTaskRequest(

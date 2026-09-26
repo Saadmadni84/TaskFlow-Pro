@@ -684,7 +684,7 @@ AI Dependency Suggestions (Semantic suggestions reviewed and explicitly accepted
 ## Testing
 
 ### Backend Tests
-Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, and Critical Path Analysis tests (165 tests):
+Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, Critical Path Analysis tests, optimistic locking concurrency tests, transactional rollback tests, preview-commit consistency tests, and Golden Scenario E2E integration tests (172 tests):
 ```bash
 cd backend
 ./mvnw test
@@ -706,6 +706,63 @@ npm run build
 
 ---
 
+## Production Hardening & Deployment (Phase 10)
+
+TaskFlow Pro has been hardened for production reliability, containerized deployment, and technical evaluation:
+
+### 1. Security & Edge Hardening
+- **Security Headers (`SecurityHeadersFilter`)**:
+  - `X-Content-Type-Options: nosniff` (MIME-sniffing prevention)
+  - `X-Frame-Options: DENY` (clickjacking defense)
+  - `Referrer-Policy: strict-origin-when-cross-origin`
+  - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- **Request Tracing & Observability (`RequestIdFilter`)**:
+  - Automatically captures incoming `X-Request-Id` or generates a UUID correlation ID.
+  - Injects correlation ID into SLF4J MDC (`requestId`) and echoes it back in the `X-Request-Id` HTTP response header.
+- **AI Rate Limiting (`AiRateLimiter`)**:
+  - Instance-local sliding-window rate limiter protecting `/api/tasks/{taskId}/dependency-suggestions`.
+  - Enforces per-client-IP quota (configurable, default 10 requests / minute) returning HTTP 429 `RATE_LIMIT_EXCEEDED` with retry information.
+- **Input Boundary Constraints**:
+  - Strict length limits: Project/Task titles (max 255 chars), descriptions (max 4000 chars), duration (0 to 3650 days).
+  - Sanitized `ErrorResponse` structure without stack trace leakage.
+- **CORS Protection**:
+  - Configurable allowed origins via `${app.cors.allowed-origins:http://localhost:3000}`.
+
+### 2. Concurrency & Transactional Resilience
+- **Optimistic Locking**:
+  - `@Version` token on tasks prevents silent overwrites; concurrent stale updates trigger HTTP 409 `CONCURRENCY_CONFLICT`.
+- **Atomic Rollback**:
+  - Multi-step DAG operations (cycle checks, schedule propagation, readiness recomputation) run inside database transactions. Any violation cleanly rolls back without orphaned dependencies or corrupted graph states.
+- **Preview / Commit Consistency**:
+  - Side-effect-free schedule preview simulation matches committed database state with 100% mathematical fidelity.
+
+### 3. End-to-End Golden Scenario
+Validated by `GoldenScenarioE2EIntegrationTest`:
+1. **Diamond Converging DAG**: Task A (5d) branches to Task B (3d) and Task C (4d), which converge into Task D (2d).
+2. **Initial Readiness & CPM**: Task A is `READY`, B, C, D are `BLOCKED`. Critical path is `A -> C -> D` (11 days, slack 0). Task B has 1 day float.
+3. **Cascading Readiness**: Completing A unlocks B and C (`READY`), while D remains `BLOCKED` until both B and C complete.
+4. **No-Compounding Schedule Shift**: Delaying A by +3 days propagates downstream, shifting D by exactly +3 days (from Day 10 to Day 13), **never compounding to +6 days**.
+5. **Baseline Recovery**: Returning A to its original planned start date restores all downstream dates to initial baseline without drift.
+6. **AI Suggestion & Human Acceptance**: Grounded suggestion for Task E is explicitly accepted, creating the dependency and scheduling E immediately after D.
+
+### 4. Deterministic Seed Data
+A comprehensive production demonstration project is automatically seeded via Flyway migration `V4__seed_demo_data.sql`:
+- **Project ID**: `00000000-0000-0000-0000-000000000001` ("Payment Checkout Integration")
+- **8 Tasks (A through H)**: Incorporating requirements, API contracts, backend payment processor, checkout UI, integration verification, security review, production deployment, and monitoring.
+- **Topology**: Converging diamond graph (`A -> B -> D` and `A -> C -> D`), critical path sequences, and mixed workflow states (`DONE`, `IN_PROGRESS`, `BACKLOG`).
+
+### 5. Multi-Container Orchestration (`docker-compose.yml`)
+Full-stack production orchestration with health checks and ordered startup dependencies:
+```bash
+# Build and run the entire stack (PostgreSQL + Spring Boot Backend + Next.js Frontend)
+docker compose up --build
+```
+- **Postgres**: `postgres:16-alpine` on port 5432 with `pg_isready` health check.
+- **Backend**: Multi-stage `eclipse-temurin:21-jre-alpine` container running as non-root user `taskflow` with Actuator liveness/readiness probe on `/actuator/health`.
+- **Frontend**: Multi-stage `node:20-alpine` standalone runner on port 3000 running as non-root user `nextjs`.
+
+---
+
 ## Implemented Phases
 
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
@@ -717,6 +774,7 @@ npm run build
 - [x] **Phase 7**: AI-Assisted Dependency Suggestion Engine (pluggable provider abstraction, Google Gemini REST adapter with JSON schema enforcement, grounded project task context, prompt injection defense, server-side validation against hallucination/cycles/cross-project/self-dependency, human-in-the-loop explicit acceptance flow delegating to deterministic graph engine, offline degradation, and comprehensive unit/integration test suite).
 - [x] **Phase 8**: Critical Path Analysis Engine (pure deterministic CPM calculation, forward/backward pass, total slack calculation, critical task identification, bounded multi-path reconstruction, read-only REST API `GET /api/projects/{projectId}/critical-path`, inclusive calendar date arithmetic, and comprehensive test suite).
 - [x] **Phase 9**: Production Kanban Frontend and Workflow UI (responsive 4-column Kanban board, authoritative readiness and schedule display, accessible card actions, optimistic UI with server rollback, schedule impact preview intercept modal, dependency management with cycle error reporting, AI suggestion review with explicit acceptance, and multi-path critical path analysis modal).
+- [x] **Phase 10**: Production Hardening, Security, E2E Validation & Deployment Readiness (HTTP security headers, correlation ID request tracing, sliding-window AI rate limiting, input boundary constraints, optimistic locking concurrency protection, atomic rollback guarantees, preview/commit consistency verification, Golden Scenario E2E test, deterministic seed demo migration, multi-stage production Dockerfiles, Actuator health probes, and full Docker Compose orchestration).
 
 
 

@@ -34,4 +34,6 @@ ai:
   api-key: ""
   timeout-seconds: 5
   max-suggestions: 10
+  rate-limit:
+    requests-per-minute: 1000
 
