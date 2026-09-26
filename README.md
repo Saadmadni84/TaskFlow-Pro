@@ -577,13 +577,124 @@ A (3d)│             ├──> D (4d)
 - **Space Complexity**: `O(V + E)` in memory.
 - **Side-Effect Free**: Analytical only. Calling `GET /api/projects/{projectId}/critical-path` performs zero database writes, does not increment entity versions, and leaves task schedules intact.
 
+## Frontend
+
+The TaskFlow Pro frontend is a fast, responsive, production Kanban workflow interface that exposes the deterministic DAG, readiness engine, scheduling engine, impact preview, AI suggestions, and critical path analysis.
+
+### Installation & Development
+
+```bash
+cd frontend
+npm install --legacy-peer-deps
+npm run dev
+```
+
+The application runs locally on `http://localhost:3000`.
+
+### Environment Configuration
+
+Configure the backend API URL in `frontend/.env.local` or root `.env`:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
+# Fallback support
+NEXT_PUBLIC_API_URL=http://localhost:8080/api
+```
+
+### Frontend Architecture
+
+```text
+frontend/
+├── app/
+│   ├── page.tsx                     # Landing page with Phase 9 launchpad
+│   ├── kanban/page.tsx              # Primary production Kanban board
+│   ├── projects/[projectId]/page.tsx# Project-scoped Kanban route
+│   ├── error.tsx                    # Error boundary for unexpected rendering faults
+│   └── ...
+├── components/
+│   ├── board/
+│   │   ├── KanbanWorkspace.tsx      # Master project workspace coordinator
+│   │   ├── KanbanBoard.tsx          # 4-column responsive grid
+│   │   ├── KanbanColumn.tsx         # Drag target & dynamic task counter
+│   │   └── TaskCard.tsx             # Authoritative readiness, dates, accessible menu
+│   ├── task/
+│   │   ├── TaskCreateDialog.tsx     # Validated task creation dialog
+│   │   ├── TaskEditDialog.tsx       # Details edit with impact preview intercept
+│   │   └── TaskDeleteDialog.tsx     # Dependency-aware deletion confirmation
+│   ├── dependency/
+│   │   └── DependencyModal.tsx      # Prerequisites, dependents, cycle error feedback
+│   ├── scheduling/
+│   │   └── ScheduleImpactPreviewModal.tsx # Downstream simulation with non-compounding reason
+│   ├── ai/
+│   │   └── AiSuggestionsModal.tsx   # Grounded candidate review with confidence & accept
+│   ├── criticalpath/
+│   │   └── CriticalPathModal.tsx    # Completion date, zero-slack bottlenecks, multi-path
+│   └── ui/
+│       ├── Modal.tsx                # Accessible backdrop and keyboard focus management
+│       ├── Skeleton.tsx             # Board skeleton loaders
+│       ├── Badge.tsx, Button.tsx, Card.tsx
+├── hooks/
+│   ├── useProjects.ts               # Project listing and selection
+│   └── useProjectBoard.ts           # State orchestration, optimistic rollback, server reconciliation
+├── lib/
+│   ├── api/                         # Typed domain API client modules
+│   │   ├── client.ts, projects.ts, tasks.ts, dependencies.ts, scheduling.ts, ai.ts, criticalPath.ts
+│   └── utils/
+│       └── dates.ts                 # Timezone-safe calendar date arithmetic and formatting
+└── types/
+    └── index.ts                     # TypeScript domain contracts strictly matching Spring DTOs
+```
+
+### Major UI Features
+
+1. **Authoritative 4-Column Workflow**: Columns `Backlog`, `In Progress`, `Review`, `Done`. The frontend never calculates `READY` or `BLOCKED`; it renders the server's `dependencyStatus` and dynamic task counts.
+2. **Optimistic Movement with Server Rollback**: Fast drag-and-drop with instant visual feedback; reverts immediately with a clear alert if the server rejects the move or reports a concurrency conflict.
+3. **Accessible "Move to..." Navigation**: Full keyboard accessibility via the compact card menu (`•••`), enabling status transitions without requiring drag interactions.
+4. **Dependency Impact Preview Flow**: Editing a task's planned start date intercepts with a preview modal, presenting simulated downstream shifts (+X days), constraint sources, and non-compounding path explanations before committing.
+5. **Interactive Dependency Manager**: Search and add project prerequisites, remove prerequisites, with real-time cycle detection feedback (`Dependency not added. This dependency would create a cycle in the workflow.`).
+6. **AI Dependency Suggestions**: Grounded LLM proposals showing confidence percentage and domain reasoning with explicit human review (`[Accept]` / `[Dismiss]`) and graceful degradation if AI is unavailable.
+7. **Critical Path Bottleneck Viewer**: Exposes project completion date, critical tasks (0 slack), float distribution, and renders all parallel critical paths.
+
+---
+
+## User Workflow
+
+The end-to-end user journey follows a deterministic, human-in-the-loop progression:
+
+```text
+Create Task
+    ↓
+Add Dependencies (Prerequisites / Dependents)
+    ↓ (Server validates DAG, rejects cycles, calculates initial schedule)
+Move Through Kanban (Backlog → In Progress → Review → Done)
+    ↓ (Optimistic move with server reconciliation & rollback on error)
+Dependency State Updates (Upstream Done unlocks downstream Ready; Reopen blocks successors)
+    ↓
+Schedule Propagates (Topological non-compounding date calculation)
+    ↓
+Impact Preview (Planned date change triggers downstream simulation preview before commit)
+    ↓
+Critical Path Analysis (View zero-slack bottleneck chains and completion date)
+    ↓
+AI Dependency Suggestions (Semantic suggestions reviewed and explicitly accepted)
+```
+
+---
+
 ## Testing
 
 ### Backend Tests
-Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, and Critical Path Analysis tests:
+Runs context initialization, structured exception handler verification, database integration, DAG engine tests, readiness engine tests, scheduling engine tests, impact preview tests, AI suggestion tests, and Critical Path Analysis tests (165 tests):
 ```bash
 cd backend
 ./mvnw test
+```
+
+### Frontend Tests
+Runs comprehensive component and hook tests with Vitest and React Testing Library (20 tests across 8 suites):
+```bash
+cd frontend
+npm test
 ```
 
 ### Frontend Build & Lint Verification
@@ -593,9 +704,10 @@ npm run lint
 npm run build
 ```
 
-## Future Modules
+---
 
-### Implemented (Phases 1 - 8)
+## Implemented Phases
+
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
 - [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
 - [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
@@ -604,8 +716,7 @@ npm run build
 - [x] **Phase 6**: Dependency Impact Preview (side-effect-free in-memory schedule simulation, identical calculation engine reuse, binding predecessor identification, converging path non-compounding explanation, preview/commit consistency verification, and REST preview API).
 - [x] **Phase 7**: AI-Assisted Dependency Suggestion Engine (pluggable provider abstraction, Google Gemini REST adapter with JSON schema enforcement, grounded project task context, prompt injection defense, server-side validation against hallucination/cycles/cross-project/self-dependency, human-in-the-loop explicit acceptance flow delegating to deterministic graph engine, offline degradation, and comprehensive unit/integration test suite).
 - [x] **Phase 8**: Critical Path Analysis Engine (pure deterministic CPM calculation, forward/backward pass, total slack calculation, critical task identification, bounded multi-path reconstruction, read-only REST API `GET /api/projects/{projectId}/critical-path`, inclusive calendar date arithmetic, and comprehensive test suite).
+- [x] **Phase 9**: Production Kanban Frontend and Workflow UI (responsive 4-column Kanban board, authoritative readiness and schedule display, accessible card actions, optimistic UI with server rollback, schedule impact preview intercept modal, dependency management with cycle error reporting, AI suggestion review with explicit acceptance, and multi-path critical path analysis modal).
 
-### Planned (Upcoming Phases)
-- [ ] **Phase 9**: Interactive four-column Kanban board with `dnd-kit` and interactive graph visualizations
 
 

@@ -11,14 +11,19 @@ const ROUTE_INFO: Record<string, { title: string; phase: string }> = {
   '/readiness': { title: 'Dependency Readiness Engine', phase: 'Phase 4' },
   '/scheduling': { title: 'Dependency-Aware Scheduling Engine', phase: 'Phase 5' },
   '/impact-preview': { title: 'Dependency Impact Preview', phase: 'Phase 6' },
-  '/kanban': { title: 'Interactive Kanban Board', phase: 'Phase 7' },
-  '/critical-path': { title: 'Critical Path Analysis', phase: 'Planned' },
-  '/ai-suggestions': { title: 'AI Dependency Suggestions', phase: 'Planned' },
+  '/ai-suggestions': { title: 'AI Dependency Suggestions', phase: 'Phase 7' },
+  '/critical-path': { title: 'Critical Path Analysis', phase: 'Phase 8' },
+  '/kanban': { title: 'Production Kanban Board', phase: 'Phase 9' },
+  '/kanban-board': { title: 'Production Kanban Board', phase: 'Phase 9' },
 };
 
 export const Header: React.FC = () => {
   const pathname = usePathname();
-  const current = ROUTE_INFO[pathname] || { title: 'DAG Scheduling Platform', phase: 'TaskFlow Pro' };
+  const current =
+    ROUTE_INFO[pathname] ||
+    (pathname.startsWith('/projects')
+      ? { title: 'Project Workflow Workspace', phase: 'Phase 9' }
+      : { title: 'DAG Scheduling Platform', phase: 'TaskFlow Pro' });
 
   return (
     <header className="h-14 border-b border-zinc-800/80 bg-zinc-950/70 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-20">

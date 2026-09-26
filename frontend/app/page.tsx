@@ -22,6 +22,18 @@ export default function HomePage() {
           The deterministic graph scheduler owns readiness states, topological schedule propagation,
           and cycle prevention.
         </p>
+
+        <div className="pt-2 flex items-center gap-3">
+          <a
+            href="/kanban"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs shadow-md transition-all duration-150"
+          >
+            <span>Launch Kanban Board (Phase 9)</span>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </a>
+        </div>
       </div>
 
       {/* Architectural Pillars */}

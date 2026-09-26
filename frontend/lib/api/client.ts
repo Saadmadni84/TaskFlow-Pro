@@ -1,6 +1,9 @@
 import { ApiErrorResponse } from '@/types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+const BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:8080/api';
 
 export class ApiClientError extends Error {
   public readonly status: number;
@@ -9,7 +12,7 @@ export class ApiClientError extends Error {
   public readonly path?: string;
 
   constructor(errorResponse: ApiErrorResponse) {
-    super(errorResponse.message);
+    super(errorResponse.message || 'An unexpected API error occurred');
     this.name = 'ApiClientError';
     this.status = errorResponse.status;
     this.code = errorResponse.code;
@@ -19,7 +22,8 @@ export class ApiClientError extends Error {
 }
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const url = `${BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = `${BASE_URL}${cleanEndpoint}`;
 
   const defaultHeaders: HeadersInit = {
     'Content-Type': 'application/json',
@@ -34,7 +38,19 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     },
   };
 
-  const response = await fetch(url, config);
+  let response: Response;
+  try {
+    response = await fetch(url, config);
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Network request failed';
+    throw new ApiClientError({
+      timestamp: new Date().toISOString(),
+      status: 0,
+      code: 'NETWORK_FAILURE',
+      message: `Unable to connect to TaskFlow Pro backend: ${errorMsg}`,
+      path: cleanEndpoint,
+    });
+  }
 
   if (!response.ok) {
     let errorData: ApiErrorResponse;
@@ -45,14 +61,20 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
         timestamp: new Date().toISOString(),
         status: response.status,
         code: 'HTTP_ERROR',
-        message: `HTTP error ${response.status}: ${response.statusText}`,
-        path: endpoint,
+        message: `Request failed with status ${response.status}: ${response.statusText}`,
+        path: cleanEndpoint,
       };
     }
     throw new ApiClientError(errorData);
   }
 
-  return response.json() as Promise<T>;
+  // Handle empty responses (like 204 No Content)
+  if (response.status === 204) {
+    return {} as T;
+  }
+
+  const text = await response.text();
+  return text ? (JSON.parse(text) as T) : ({} as T);
 }
 
 export const apiClient = {

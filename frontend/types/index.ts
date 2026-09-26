@@ -1,40 +1,163 @@
 /**
  * Core domain types for TaskFlow Pro
+ * Matching backend contracts from Phases 1–8.
  */
 
 export type TaskStatus = 'BACKLOG' | 'IN_PROGRESS' | 'REVIEW' | 'DONE';
 
-export type ReadinessStatus = 'READY' | 'BLOCKED';
+export type DependencyStatus = 'READY' | 'BLOCKED';
+
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  description?: string;
+}
 
 export interface Task {
   id: string;
+  projectId: string;
   title: string;
   description?: string;
-  status: TaskStatus;
-  readinessStatus: ReadinessStatus;
+  workflowStatus: TaskStatus;
+  dependencyStatus: DependencyStatus;
+  plannedStartDate?: string; // YYYY-MM-DD
+  scheduledStartDate?: string; // YYYY-MM-DD
+  scheduledDueDate?: string; // YYYY-MM-DD
   startDate?: string;
   dueDate?: string;
-  durationDays?: number;
-  isCriticalPath?: boolean;
+  durationDays: number;
+  version: number;
   createdAt: string;
   updatedAt: string;
 }
 
-export type DependencyType = 'FINISH_TO_START';
+export interface CreateTaskRequest {
+  projectId: string;
+  title: string;
+  description?: string;
+  workflowStatus?: TaskStatus;
+  plannedStartDate?: string;
+  startDate?: string;
+  dueDate?: string;
+  durationDays?: number;
+}
 
-export interface Dependency {
+export interface UpdateTaskRequest {
+  title: string;
+  description?: string;
+  workflowStatus?: TaskStatus;
+  plannedStartDate?: string;
+  startDate?: string;
+  dueDate?: string;
+  durationDays?: number;
+}
+
+export interface TaskDependency {
   id: string;
   predecessorTaskId: string;
   successorTaskId: string;
-  type: DependencyType;
   createdAt: string;
 }
 
-export interface ApiSuccessResponse<T> {
-  timestamp: string;
-  status: number;
-  message: string;
-  data: T;
+export interface CreateDependencyRequest {
+  predecessorTaskId: string;
+  successorTaskId: string;
+}
+
+export type ImpactType = 'DELAYED' | 'UNCHANGED' | 'SHIFTED_EARLIER';
+
+export type ReasonType = 
+  | 'DIRECT_CHANGE' 
+  | 'BINDING_PREDECESSOR' 
+  | 'CONVERGING_PATHS' 
+  | 'UNCHANGED';
+
+export interface TaskScheduleImpact {
+  taskId: string;
+  title: string;
+  currentPlannedStart?: string;
+  proposedPlannedStart?: string;
+  currentScheduledStart?: string;
+  proposedScheduledStart?: string;
+  currentScheduledDue?: string;
+  proposedScheduledDue?: string;
+  durationDays: number;
+  startShiftDays: number;
+  dueShiftDays: number;
+  shiftDays: number;
+  impactType: ImpactType;
+  reasonType: ReasonType;
+  constraintSourceTaskIds: string[];
+  constraintDate?: string;
+  reason: string;
+}
+
+export interface ScheduleImpactSummary {
+  affectedTaskCount: number;
+  changedTaskCount: number;
+  unchangedTaskCount: number;
+  maximumDelayDays: number;
+}
+
+export interface ScheduleImpactPreviewResponse {
+  sourceTaskId: string;
+  summary: ScheduleImpactSummary;
+  tasks: TaskScheduleImpact[];
+}
+
+export interface SchedulePreviewRequest {
+  plannedStartDate: string; // YYYY-MM-DD
+}
+
+export interface TaskSummary {
+  taskId: string;
+  title: string;
+}
+
+export interface DependencySuggestion {
+  predecessor: TaskSummary;
+  successor: TaskSummary;
+  confidence: number;
+  reason: string;
+}
+
+export interface DependencySuggestionResponse {
+  targetTaskId: string;
+  suggestionCount: number;
+  suggestions: DependencySuggestion[];
+}
+
+export interface AcceptSuggestionRequest {
+  predecessorTaskId: string;
+  successorTaskId: string;
+}
+
+export interface TaskMetrics {
+  taskId: string;
+  title: string;
+  durationDays: number;
+  earliestStart: string;
+  earliestFinish: string;
+  latestStart: string;
+  latestFinish: string;
+  totalSlackDays: number;
+  isCritical: boolean;
+}
+
+export interface CriticalPathResponse {
+  projectId: string;
+  projectStartDate: string;
+  projectCompletionDate: string;
+  criticalTaskIds: string[];
+  criticalPaths: string[][];
+  tasks: TaskMetrics[];
 }
 
 export interface ApiValidationErrorDetail {
