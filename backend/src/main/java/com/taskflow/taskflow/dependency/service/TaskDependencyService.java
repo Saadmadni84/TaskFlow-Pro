@@ -1,12 +1,19 @@
 package com.taskflow.taskflow.dependency.service;
 
+import com.taskflow.taskflow.common.exception.CycleDetectedException;
 import com.taskflow.taskflow.common.exception.DuplicateDependencyException;
 import com.taskflow.taskflow.common.exception.InvalidDependencyException;
+import com.taskflow.taskflow.common.exception.SelfDependencyException;
 import com.taskflow.taskflow.common.exception.TaskNotFoundException;
 import com.taskflow.taskflow.dependency.dto.CreateDependencyRequest;
 import com.taskflow.taskflow.dependency.dto.DependencyMapper;
 import com.taskflow.taskflow.dependency.dto.DependencyResponse;
 import com.taskflow.taskflow.dependency.entity.TaskDependency;
+import com.taskflow.taskflow.dependency.graph.AffectedSubgraph;
+import com.taskflow.taskflow.dependency.graph.CycleDetectionService;
+import com.taskflow.taskflow.dependency.graph.DependencyGraph;
+import com.taskflow.taskflow.dependency.graph.DependencyGraphBuilder;
+import com.taskflow.taskflow.dependency.graph.GraphTraversalService;
 import com.taskflow.taskflow.dependency.repository.TaskDependencyRepository;
 import com.taskflow.taskflow.task.entity.Task;
 import com.taskflow.taskflow.task.repository.TaskRepository;
@@ -14,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -22,12 +30,35 @@ public class TaskDependencyService {
 
     private final TaskDependencyRepository dependencyRepository;
     private final TaskRepository taskRepository;
+    private final DependencyGraphBuilder graphBuilder;
+    private final CycleDetectionService cycleDetectionService;
+    private final GraphTraversalService traversalService;
 
-    public TaskDependencyService(TaskDependencyRepository dependencyRepository, TaskRepository taskRepository) {
+    public TaskDependencyService(
+            TaskDependencyRepository dependencyRepository,
+            TaskRepository taskRepository,
+            DependencyGraphBuilder graphBuilder,
+            CycleDetectionService cycleDetectionService,
+            GraphTraversalService traversalService
+    ) {
         this.dependencyRepository = dependencyRepository;
         this.taskRepository = taskRepository;
+        this.graphBuilder = graphBuilder;
+        this.cycleDetectionService = cycleDetectionService;
+        this.traversalService = traversalService;
     }
 
+    /**
+     * Atomically validates and persists a new dependency edge:
+     * predecessor -> successor
+     *
+     * Validates:
+     * 1. Self-dependency rejection
+     * 2. Both tasks exist
+     * 3. Project isolation
+     * 4. Duplicate edge rejection
+     * 5. Cycle detection: does adding predecessor -> successor close a cycle?
+     */
     @Transactional
     public DependencyResponse createDependency(CreateDependencyRequest request) {
         UUID predecessorId = request.predecessorTaskId();
@@ -39,7 +70,7 @@ public class TaskDependencyService {
 
         // Invariant 1: Self-dependency forbidden
         if (predecessorId.equals(successorId)) {
-            throw new InvalidDependencyException("Self-dependency is forbidden: task cannot depend on itself");
+            throw new SelfDependencyException(predecessorId);
         }
 
         // Invariant 2: Both tasks must exist
@@ -65,6 +96,17 @@ public class TaskDependencyService {
             );
         }
 
+        // Invariant 5: Cycle detection - targeted reachability check before persistence
+        DependencyGraph projectGraph = graphBuilder.buildGraphForProject(predProjectId);
+        if (cycleDetectionService.wouldCreateCycle(projectGraph, predecessorId, successorId)) {
+            Optional<List<UUID>> cyclePath = cycleDetectionService.getPotentialCyclePath(projectGraph, predecessorId, successorId);
+            throw new CycleDetectedException(
+                    String.format("Circular dependency detected: adding dependency [%s -> %s] would create a cycle",
+                            predecessorId, successorId),
+                    cyclePath.orElse(List.of(predecessorId, successorId, predecessorId))
+            );
+        }
+
         TaskDependency dependency = new TaskDependency(predecessor, successor);
         TaskDependency saved = dependencyRepository.save(dependency);
         return DependencyMapper.toResponse(saved);
@@ -86,6 +128,17 @@ public class TaskDependencyService {
         return dependencyRepository.findByProjectId(projectId).stream()
                 .map(DependencyMapper::toResponse)
                 .toList();
+    }
+
+    public DependencyGraph getProjectGraph(UUID projectId) {
+        return graphBuilder.buildGraphForProject(projectId);
+    }
+
+    public AffectedSubgraph getAffectedSubgraph(UUID taskId) {
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
+        DependencyGraph graph = graphBuilder.buildGraphForProject(task.getProject().getId());
+        return traversalService.getAffectedSubgraph(graph, taskId);
     }
 
     @Transactional

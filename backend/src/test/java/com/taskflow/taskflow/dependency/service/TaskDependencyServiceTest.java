@@ -1,11 +1,17 @@
 package com.taskflow.taskflow.dependency.service;
 
+import com.taskflow.taskflow.common.exception.CycleDetectedException;
 import com.taskflow.taskflow.common.exception.DuplicateDependencyException;
 import com.taskflow.taskflow.common.exception.InvalidDependencyException;
+import com.taskflow.taskflow.common.exception.SelfDependencyException;
 import com.taskflow.taskflow.common.exception.TaskNotFoundException;
 import com.taskflow.taskflow.dependency.dto.CreateDependencyRequest;
 import com.taskflow.taskflow.dependency.dto.DependencyResponse;
 import com.taskflow.taskflow.dependency.entity.TaskDependency;
+import com.taskflow.taskflow.dependency.graph.CycleDetectionService;
+import com.taskflow.taskflow.dependency.graph.DependencyGraph;
+import com.taskflow.taskflow.dependency.graph.DependencyGraphBuilder;
+import com.taskflow.taskflow.dependency.graph.GraphTraversalService;
 import com.taskflow.taskflow.dependency.repository.TaskDependencyRepository;
 import com.taskflow.taskflow.project.entity.Project;
 import com.taskflow.taskflow.task.entity.Task;
@@ -19,12 +25,14 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -37,6 +45,15 @@ class TaskDependencyServiceTest {
 
     @Mock
     private TaskRepository taskRepository;
+
+    @Mock
+    private DependencyGraphBuilder graphBuilder;
+
+    @Mock
+    private CycleDetectionService cycleDetectionService;
+
+    @Mock
+    private GraphTraversalService traversalService;
 
     @InjectMocks
     private TaskDependencyService dependencyService;
@@ -58,13 +75,17 @@ class TaskDependencyServiceTest {
     }
 
     @Test
-    @DisplayName("Should create dependency when tasks exist in same project and are not duplicates")
+    @DisplayName("Should create dependency when valid, acyclic, and within same project")
     void shouldCreateDependencySuccessfully() {
         CreateDependencyRequest request = new CreateDependencyRequest(taskA.getId(), taskB.getId());
 
         when(taskRepository.findById(taskA.getId())).thenReturn(Optional.of(taskA));
         when(taskRepository.findById(taskB.getId())).thenReturn(Optional.of(taskB));
         when(dependencyRepository.existsByPredecessorIdAndSuccessorId(taskA.getId(), taskB.getId())).thenReturn(false);
+
+        DependencyGraph projectGraph = new DependencyGraph(projectA.getId());
+        when(graphBuilder.buildGraphForProject(projectA.getId())).thenReturn(projectGraph);
+        when(cycleDetectionService.wouldCreateCycle(projectGraph, taskA.getId(), taskB.getId())).thenReturn(false);
 
         TaskDependency savedDependency = new TaskDependency(UUID.randomUUID(), taskA, taskB);
         when(dependencyRepository.save(any(TaskDependency.class))).thenReturn(savedDependency);
@@ -78,12 +99,34 @@ class TaskDependencyServiceTest {
     }
 
     @Test
+    @DisplayName("Should reject dependency when circular dependency is detected")
+    void shouldRejectCircularDependency() {
+        CreateDependencyRequest request = new CreateDependencyRequest(taskB.getId(), taskA.getId());
+
+        when(taskRepository.findById(taskB.getId())).thenReturn(Optional.of(taskB));
+        when(taskRepository.findById(taskA.getId())).thenReturn(Optional.of(taskA));
+        when(dependencyRepository.existsByPredecessorIdAndSuccessorId(taskB.getId(), taskA.getId())).thenReturn(false);
+
+        DependencyGraph projectGraph = new DependencyGraph(projectA.getId());
+        when(graphBuilder.buildGraphForProject(projectA.getId())).thenReturn(projectGraph);
+        when(cycleDetectionService.wouldCreateCycle(projectGraph, taskB.getId(), taskA.getId())).thenReturn(true);
+        when(cycleDetectionService.getPotentialCyclePath(projectGraph, taskB.getId(), taskA.getId()))
+                .thenReturn(Optional.of(List.of(taskB.getId(), taskA.getId(), taskB.getId())));
+
+        assertThatThrownBy(() -> dependencyService.createDependency(request))
+                .isInstanceOf(CycleDetectedException.class)
+                .hasMessageContaining("Circular dependency detected");
+
+        verify(dependencyRepository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("Should reject self-dependency")
     void shouldRejectSelfDependency() {
         CreateDependencyRequest request = new CreateDependencyRequest(taskA.getId(), taskA.getId());
 
         assertThatThrownBy(() -> dependencyService.createDependency(request))
-                .isInstanceOf(InvalidDependencyException.class)
+                .isInstanceOf(SelfDependencyException.class)
                 .hasMessageContaining("Self-dependency is forbidden");
 
         verify(dependencyRepository, never()).save(any());

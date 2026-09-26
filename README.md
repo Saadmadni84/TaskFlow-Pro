@@ -105,6 +105,31 @@ erDiagram
     }
 ```
 
+## Dependency Graph Engine (DAG)
+
+The DAG engine is the deterministic source of truth for graph topology. It is decoupled from Spring Data, web controllers, React, and scheduling math.
+
+### In-Memory Graph Representation
+- **Isolation**: When evaluating or traversing dependencies, the relevant project subgraph is loaded into memory in a single query (`DependencyGraphBuilder`), preventing N+1 database queries.
+- **Node & Edge Indexes**: Maintained as `Map<UUID, Set<UUID>>` for both outgoing (`successors`) and incoming (`predecessors`) edges, enabling $O(1)$ adjacency lookups.
+- **Immutability & Safety**: Collections returned from the graph are defensive, unmodifiable copies.
+
+### Algorithms & Complexity
+
+#### 1. Cycle Detection ($O(V + E)$)
+- **Full Graph Inspection**: Implemented via depth-first search (DFS) with a three-color state machine (`UNVISITED`, `VISITING`, `VISITED`). Encountering a node currently in the `VISITING` state identifies a directed back-edge, confirming a cycle.
+- **Targeted Edge Pre-Validation**: Before creating edge $A \rightarrow B$, the engine evaluates if $B$ can already reach $A$ via graph traversal. If reachable, adding $A \rightarrow B$ is rejected with `CycleDetectedException` before database writes occur, ensuring transactional integrity.
+
+#### 2. Topological Sorting ($O(V + E)$)
+- **Kahn's Algorithm**: Nodes with zero in-degree are processed iteratively while decrementing successor in-degrees.
+- **Deterministic Tie-Breaking**: When multiple nodes have zero in-degree simultaneously, a priority queue resolves ties via standard natural UUID lexical order. Identical graphs produce identical, deterministic execution orders every time.
+- **Cycle Guard**: If the processed node count is less than the total node count, Kahn's algorithm confirms a cycle and aborts.
+
+#### 3. Traversal ($O(V + E)$)
+- **Descendant Traversal**: Traverses all downstream nodes using BFS, ensuring converging dependencies (e.g. $A \rightarrow B \rightarrow D$ and $A \rightarrow C \rightarrow D$) include shared successor $D$ exactly once without duplicate processing.
+- **Ancestor Traversal**: Traverses upstream prerequisites via incoming edges.
+- **Affected Subgraph**: Produces the set of all downstream tasks affected by a change, ordered in topological sequence for schedule recalculation.
+
 ## Technology Stack
 
 ### Backend
@@ -268,11 +293,12 @@ npm run build
 
 ## Future Modules
 
-### Implemented (Phase 1 & Phase 2)
+### Implemented (Phases 1 - 3)
 - [x] **Phase 1**: Monorepo foundation, Spring Boot 3 modular monolith (Java 21), Next.js 14 shell, Docker Compose PostgreSQL 16, Flyway baseline, centralized error handling.
 - [x] **Phase 2**: Core domain model (`Project`, `Task`, `TaskDependency`), PostgreSQL relational schema via Flyway (`V2__create_core_domain_tables.sql`), optimistic locking, project isolation validation, and persistence test suite.
+- [x] **Phase 3**: Deterministic DAG Engine (`DependencyGraph`, DFS cycle detection, Kahn's topological sort with deterministic tie-breaking, reachability, descendant/ancestor traversal, affected subgraph calculation, and transactional cycle prevention).
 
 ### Planned (Upcoming Phases)
-- [ ] **Phase 3**: Deterministic DAG Engine (self-dependency validation, cycle detection, topological sorting, affected subgraph calculation, and derived readiness engine)
-- [ ] **Phase 4**: Downstream schedule propagation engine (non-compounding shift calculation) and critical path analysis
-- [ ] **Phase 5**: Interactive four-column Kanban board with `dnd-kit` and human-in-the-loop AI dependency suggestions
+- [ ] **Phase 4**: Dependency Readiness Engine (evaluating prerequisite completion, derived `READY`/`BLOCKED` status propagation, task reopen behavior)
+- [ ] **Phase 5**: Downstream schedule propagation engine (non-compounding shift calculation) and critical path analysis
+- [ ] **Phase 6**: Interactive four-column Kanban board with `dnd-kit` and human-in-the-loop AI dependency suggestions
