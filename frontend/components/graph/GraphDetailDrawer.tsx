@@ -8,6 +8,9 @@ interface GraphDetailDrawerProps {
   task: DependencyGraphNode;
   predecessors: DependencyGraphNode[];
   successors: DependencyGraphNode[];
+  ancestors?: DependencyGraphNode[];
+  descendants?: DependencyGraphNode[];
+  highlightMode?: 'DIRECT' | 'ALL';
   onClose: () => void;
   onSelectTask: (taskId: string) => void;
   onRemoveDependency: (predId: string, succId: string) => Promise<void>;
@@ -19,6 +22,9 @@ export const GraphDetailDrawer: React.FC<GraphDetailDrawerProps> = ({
   task,
   predecessors,
   successors,
+  ancestors = [],
+  descendants = [],
+  highlightMode = 'DIRECT',
   onClose,
   onSelectTask,
   onRemoveDependency,
@@ -30,13 +36,20 @@ export const GraphDetailDrawer: React.FC<GraphDetailDrawerProps> = ({
       aria-label={`Details for task ${task.title}`}
       className="w-80 shrink-0 border-l border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md p-5 flex flex-col justify-between overflow-y-auto z-10"
     >
-      <div className="space-y-6">
+      <div className="space-y-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-2 border-b border-zinc-800/80 pb-3">
           <div className="space-y-1">
-            <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-              Task Details
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
+                Task Details
+              </span>
+              {highlightMode === 'ALL' && (
+                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-950/70 border border-amber-500/40 text-amber-300">
+                  Full Chain
+                </span>
+              )}
+            </div>
             <h3 className="text-sm font-semibold text-zinc-100 leading-snug">
               {task.title}
             </h3>
@@ -103,10 +116,10 @@ export const GraphDetailDrawer: React.FC<GraphDetailDrawerProps> = ({
 
           {predecessors.length === 0 ? (
             <p className="text-[11px] text-zinc-500 italic p-2 rounded bg-zinc-900/30 border border-zinc-800/40">
-              No prerequisites. Task is an initial root.
+              No direct prerequisites. Initial root task.
             </p>
           ) : (
-            <div className="space-y-1.5 max-h-36 overflow-y-auto">
+            <div className="space-y-1.5 max-h-32 overflow-y-auto">
               {predecessors.map((p) => (
                 <div
                   key={p.id}
@@ -134,6 +147,30 @@ export const GraphDetailDrawer: React.FC<GraphDetailDrawerProps> = ({
           )}
         </div>
 
+        {/* Transitive Ancestors (Full Chain) */}
+        {highlightMode === 'ALL' && ancestors.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-amber-300 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />
+                Upstream Ancestors ({ancestors.length})
+              </span>
+              <span className="text-[10px] text-zinc-500 font-mono">Transitive</span>
+            </div>
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              {ancestors.map((a) => (
+                <button
+                  key={a.id}
+                  onClick={() => onSelectTask(a.id)}
+                  className="w-full text-left p-1.5 rounded bg-zinc-900/40 border border-dashed border-amber-500/30 text-xs text-zinc-300 hover:text-amber-300 hover:border-amber-400 line-clamp-1 transition-colors"
+                >
+                  {a.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Direct Dependents (Outbound) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs">
@@ -146,10 +183,10 @@ export const GraphDetailDrawer: React.FC<GraphDetailDrawerProps> = ({
 
           {successors.length === 0 ? (
             <p className="text-[11px] text-zinc-500 italic p-2 rounded bg-zinc-900/30 border border-zinc-800/40">
-              No dependents. Task is a terminal sink.
+              No direct dependents. Terminal sink task.
             </p>
           ) : (
-            <div className="space-y-1.5 max-h-36 overflow-y-auto">
+            <div className="space-y-1.5 max-h-32 overflow-y-auto">
               {successors.map((s) => (
                 <div
                   key={s.id}
@@ -176,6 +213,30 @@ export const GraphDetailDrawer: React.FC<GraphDetailDrawerProps> = ({
             </div>
           )}
         </div>
+
+        {/* Transitive Descendants (Full Chain) */}
+        {highlightMode === 'ALL' && descendants.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-sky-300 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400/60" />
+                Downstream Descendants ({descendants.length})
+              </span>
+              <span className="text-[10px] text-zinc-500 font-mono">Transitive</span>
+            </div>
+            <div className="space-y-1 max-h-28 overflow-y-auto">
+              {descendants.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => onSelectTask(d.id)}
+                  className="w-full text-left p-1.5 rounded bg-zinc-900/40 border border-dashed border-sky-500/30 text-xs text-zinc-300 hover:text-sky-300 hover:border-sky-400 line-clamp-1 transition-colors"
+                >
+                  {d.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Action Footer */}

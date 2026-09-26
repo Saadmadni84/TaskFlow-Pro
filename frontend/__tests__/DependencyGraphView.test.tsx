@@ -105,4 +105,104 @@ describe('DependencyGraphView', () => {
     expect(screen.getAllByText('Implement Backend').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Prerequisites \(1\):/)).toBeInTheDocument();
   });
+
+  it('auto-selects candidate task and toggles chain mode when chain button is clicked', async () => {
+    const mockGraph = {
+      projectId: 'p-1',
+      nodes: [
+        {
+          id: 'task-a',
+          title: 'Design API',
+          workflowStatus: 'DONE' as const,
+          dependencyStatus: 'READY' as const,
+          durationDays: 3,
+        },
+        {
+          id: 'task-b',
+          title: 'Implement Backend',
+          workflowStatus: 'BACKLOG' as const,
+          dependencyStatus: 'BLOCKED' as const,
+          durationDays: 5,
+        },
+      ],
+      edges: [
+        {
+          id: 'e-1',
+          predecessorTaskId: 'task-a',
+          successorTaskId: 'task-b',
+        },
+      ],
+    };
+
+    (dependencyGraphApi.getDependencyGraph as any).mockResolvedValue(mockGraph);
+
+    render(<DependencyGraphView projectId="p-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('2 Tasks')).toBeInTheDocument();
+    });
+
+    const chainBtn = screen.getByRole('button', { name: /chain:/i });
+    expect(chainBtn).toHaveTextContent('Chain: Direct');
+
+    // Click chain button without prior selection -> auto selects task with edges and toggles to Full (Ancestors)
+    fireEvent.click(chainBtn);
+
+    await waitFor(() => {
+      expect(chainBtn).toHaveTextContent('Chain: Full (Ancestors)');
+      expect(screen.getAllByText(/Focus:/i).length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('selects and clears task focus using dropdown', async () => {
+    const mockGraph = {
+      projectId: 'p-1',
+      nodes: [
+        {
+          id: 'task-a',
+          title: 'Design API',
+          workflowStatus: 'DONE' as const,
+          dependencyStatus: 'READY' as const,
+          durationDays: 3,
+        },
+        {
+          id: 'task-b',
+          title: 'Implement Backend',
+          workflowStatus: 'BACKLOG' as const,
+          dependencyStatus: 'BLOCKED' as const,
+          durationDays: 5,
+        },
+      ],
+      edges: [
+        {
+          id: 'e-1',
+          predecessorTaskId: 'task-a',
+          successorTaskId: 'task-b',
+        },
+      ],
+    };
+
+    (dependencyGraphApi.getDependencyGraph as any).mockResolvedValue(mockGraph);
+
+    render(<DependencyGraphView projectId="p-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('2 Tasks')).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText(/select task to inspect dependency chain/i);
+    fireEvent.change(select, { target: { value: 'task-b' } });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Focus:/i).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTitle('Clear selected task focus')).toBeInTheDocument();
+    });
+
+    // Clear focus
+    fireEvent.click(screen.getByTitle('Clear selected task focus'));
+
+    await waitFor(() => {
+      expect(screen.queryByTitle('Clear selected task focus')).not.toBeInTheDocument();
+    });
+  });
 });

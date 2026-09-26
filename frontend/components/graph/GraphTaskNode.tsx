@@ -29,20 +29,33 @@ function getDependencyBadge(status: DependencyStatus) {
 }
 
 export const GraphTaskNode = memo(({ data, sourcePosition = Position.Right, targetPosition = Position.Left }: NodeProps<TaskNodeType>) => {
-  const { task, isSelected, isPredecessor, isSuccessor, isAncestor, isDescendant, isCritical, isCriticalMode } = data;
+  const {
+    task,
+    isSelected,
+    isPredecessor,
+    isSuccessor,
+    isAncestor,
+    isDescendant,
+    isCritical,
+    isCriticalMode,
+    isDimmed,
+    onSelect,
+  } = data;
   const wf = getWorkflowBadge(task.workflowStatus);
   const dep = getDependencyBadge(task.dependencyStatus);
 
   // Border & Glow styling based on topological relationship & Critical Path Mode
   let borderStyle = 'border-zinc-800/80 hover:border-zinc-700';
   let ringStyle = '';
-  let opacityStyle = '';
+  let opacityStyle = isDimmed ? 'opacity-25 hover:opacity-100 transition-opacity' : '';
   let badgeLabel: string | null = null;
   let badgeColor = '';
 
   if (isSelected) {
-    borderStyle = 'border-emerald-500';
-    ringStyle = 'ring-2 ring-emerald-500/30 shadow-lg shadow-emerald-500/10';
+    borderStyle = 'border-emerald-500 bg-emerald-950/20';
+    ringStyle = 'ring-2 ring-emerald-500/40 shadow-lg shadow-emerald-500/20';
+    badgeLabel = 'SELECTED';
+    badgeColor = 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50 font-semibold';
   } else if (isCriticalMode) {
     if (isCritical) {
       borderStyle = 'border-amber-400 bg-zinc-900';
@@ -54,29 +67,41 @@ export const GraphTaskNode = memo(({ data, sourcePosition = Position.Right, targ
       opacityStyle = 'opacity-40 hover:opacity-100 transition-opacity';
     }
   } else if (isPredecessor) {
-    borderStyle = 'border-amber-400';
-    ringStyle = 'ring-2 ring-amber-400/30 shadow-md shadow-amber-400/10';
+    borderStyle = 'border-amber-400 bg-amber-950/20';
+    ringStyle = 'ring-2 ring-amber-400/40 shadow-md shadow-amber-400/20';
     badgeLabel = 'Prerequisite';
-    badgeColor = 'bg-amber-950/90 text-amber-300 border-amber-500/40';
+    badgeColor = 'bg-amber-950/90 text-amber-300 border-amber-500/40 font-semibold';
   } else if (isSuccessor) {
-    borderStyle = 'border-sky-400';
-    ringStyle = 'ring-2 ring-sky-400/30 shadow-md shadow-sky-400/10';
+    borderStyle = 'border-sky-400 bg-sky-950/20';
+    ringStyle = 'ring-2 ring-sky-400/40 shadow-md shadow-sky-400/20';
     badgeLabel = 'Dependent';
-    badgeColor = 'bg-sky-950/90 text-sky-300 border-sky-500/40';
+    badgeColor = 'bg-sky-950/90 text-sky-300 border-sky-500/40 font-semibold';
   } else if (isAncestor) {
-    borderStyle = 'border-amber-500/50 border-dashed';
+    borderStyle = 'border-amber-500/80 border-dashed bg-amber-950/15';
+    ringStyle = 'ring-1 ring-amber-500/30';
     badgeLabel = 'Ancestor';
-    badgeColor = 'bg-zinc-900 text-zinc-400 border-zinc-700';
+    badgeColor = 'bg-amber-950/90 text-amber-300 border-amber-500/40 font-medium';
   } else if (isDescendant) {
-    borderStyle = 'border-sky-500/50 border-dashed';
+    borderStyle = 'border-sky-500/80 border-dashed bg-sky-950/15';
+    ringStyle = 'ring-1 ring-sky-500/30';
     badgeLabel = 'Descendant';
-    badgeColor = 'bg-zinc-900 text-zinc-400 border-zinc-700';
+    badgeColor = 'bg-sky-950/90 text-sky-300 border-sky-500/40 font-medium';
   }
 
   return (
     <div
       role="button"
       tabIndex={0}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect?.();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect?.();
+        }
+      }}
       aria-label={`Task: ${task.title}, Status: ${task.workflowStatus}, Readiness: ${task.dependencyStatus}`}
       aria-pressed={isSelected}
       className={`relative w-[240px] rounded-xl bg-zinc-900/90 backdrop-blur-sm p-3.5 border transition-all duration-200 select-none cursor-pointer ${borderStyle} ${ringStyle} ${opacityStyle}`}

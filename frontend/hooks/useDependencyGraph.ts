@@ -21,6 +21,8 @@ export interface GraphTaskNodeData extends Record<string, unknown> {
   isDescendant: boolean;
   isCritical?: boolean;
   isCriticalMode?: boolean;
+  isDimmed?: boolean;
+  onSelect?: () => void;
 }
 
 const NODE_WIDTH = 240;
@@ -210,6 +212,7 @@ export function useDependencyGraph(
     dagre.layout(g);
 
     const isHorizontal = layoutDirection === 'LR';
+    const hasSelection = Boolean(selectedTaskId);
 
     // Map to ReactFlow Nodes
     const flowNodes: Node<GraphTaskNodeData>[] = graph.nodes.map((node) => {
@@ -217,9 +220,23 @@ export function useDependencyGraph(
       const isSelected = node.id === selectedTaskId;
       const isPred = directPredecessors.has(node.id);
       const isSucc = directSuccessors.has(node.id);
-      const isAnc = allAncestors.has(node.id);
-      const isDesc = allDescendants.has(node.id);
+      const isAnc = allAncestors.has(node.id) && !isPred;
+      const isDesc = allDescendants.has(node.id) && !isSucc;
       const isCrit = criticalTaskSet.has(node.id);
+
+      // Determine focus state
+      let isInFocus = false;
+      if (isSelected) {
+        isInFocus = true;
+      } else if (highlightMode === 'DIRECT') {
+        isInFocus = isPred || isSucc;
+      } else {
+        // highlightMode === 'ALL'
+        isInFocus = isPred || isSucc || isAnc || isDesc;
+      }
+
+      // If a task is selected and not in critical mode, dim unrelated nodes
+      const isDimmed = !isCriticalMode && hasSelection && !isInFocus;
 
       return {
         id: node.id,
@@ -235,23 +252,28 @@ export function useDependencyGraph(
           isSelected,
           isPredecessor: isPred,
           isSuccessor: isSucc,
-          isAncestor: highlightMode === 'ALL' && isAnc,
-          isDescendant: highlightMode === 'ALL' && isDesc,
+          isAncestor: highlightMode === 'ALL' && (isPred || isAnc),
+          isDescendant: highlightMode === 'ALL' && (isSucc || isDesc),
           isCritical: isCrit,
           isCriticalMode,
+          isDimmed,
+          onSelect: () => setSelectedTaskId(node.id === selectedTaskId ? null : node.id),
         },
       };
     });
 
     // Map to ReactFlow Edges
     const flowEdges: Edge[] = graph.edges.map((edge) => {
-      const isOutboundFromSelected = edge.predecessorTaskId === selectedTaskId;
-      const isInboundToSelected = edge.successorTaskId === selectedTaskId;
-      const isChainEdge =
+      const isDirectInbound = edge.successorTaskId === selectedTaskId;
+      const isDirectOutbound = edge.predecessorTaskId === selectedTaskId;
+
+      const isAncestorChainEdge =
         (allAncestors.has(edge.predecessorTaskId) && allAncestors.has(edge.successorTaskId)) ||
-        (allDescendants.has(edge.predecessorTaskId) && allDescendants.has(edge.successorTaskId)) ||
-        (allAncestors.has(edge.predecessorTaskId) && edge.successorTaskId === selectedTaskId) ||
-        (edge.predecessorTaskId === selectedTaskId && allDescendants.has(edge.successorTaskId));
+        (allAncestors.has(edge.predecessorTaskId) && edge.successorTaskId === selectedTaskId);
+
+      const isDescendantChainEdge =
+        (edge.predecessorTaskId === selectedTaskId && allDescendants.has(edge.successorTaskId)) ||
+        (allDescendants.has(edge.predecessorTaskId) && allDescendants.has(edge.successorTaskId));
 
       const isCriticalEdge = isCriticalMode && criticalEdgeSet.has(`${edge.predecessorTaskId}->${edge.successorTaskId}`);
 
@@ -269,17 +291,28 @@ export function useDependencyGraph(
           strokeWidth = 1;
           isAnimated = false;
         }
-      } else if (isOutboundFromSelected) {
-        strokeColor = '#38bdf8'; // sky-400 (successor path)
-        strokeWidth = 2.5;
-        isAnimated = true;
-      } else if (isInboundToSelected) {
-        strokeColor = '#fbbf24'; // amber-400 (predecessor path)
-        strokeWidth = 2.5;
-        isAnimated = true;
-      } else if (highlightMode === 'ALL' && isChainEdge) {
-        strokeColor = '#a1a1aa'; // zinc-400
-        strokeWidth = 2;
+      } else if (hasSelection) {
+        if (isDirectInbound) {
+          strokeColor = '#f59e0b'; // amber-500 (direct prerequisite path)
+          strokeWidth = 3;
+          isAnimated = true;
+        } else if (isDirectOutbound) {
+          strokeColor = '#38bdf8'; // sky-400 (direct dependent path)
+          strokeWidth = 3;
+          isAnimated = true;
+        } else if (highlightMode === 'ALL' && isAncestorChainEdge) {
+          strokeColor = '#fbbf24'; // amber-400 (full ancestor chain)
+          strokeWidth = 2.5;
+          isAnimated = true;
+        } else if (highlightMode === 'ALL' && isDescendantChainEdge) {
+          strokeColor = '#0ea5e9'; // sky-500 (full descendant chain)
+          strokeWidth = 2.5;
+          isAnimated = true;
+        } else {
+          strokeColor = '#27272a'; // dimmed zinc-800 for unrelated edges
+          strokeWidth = 1;
+          isAnimated = false;
+        }
       }
 
       return {
@@ -295,8 +328,8 @@ export function useDependencyGraph(
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: strokeColor,
-          width: isCriticalEdge ? 20 : 16,
-          height: isCriticalEdge ? 20 : 16,
+          width: isCriticalEdge || isDirectInbound || isDirectOutbound || (highlightMode === 'ALL' && (isAncestorChainEdge || isDescendantChainEdge)) ? 18 : 14,
+          height: isCriticalEdge || isDirectInbound || isDirectOutbound || (highlightMode === 'ALL' && (isAncestorChainEdge || isDescendantChainEdge)) ? 18 : 14,
         },
       };
     });
@@ -325,19 +358,23 @@ export function useDependencyGraph(
   // Detailed lists for the selected task
   const selectedTaskPredecessors = useMemo(() => {
     if (!graph || !selectedTaskId) return [];
-    const predIds = new Set(
-      graph.edges.filter((e) => e.successorTaskId === selectedTaskId).map((e) => e.predecessorTaskId)
-    );
-    return graph.nodes.filter((n) => predIds.has(n.id));
-  }, [graph, selectedTaskId]);
+    return graph.nodes.filter((n) => directPredecessors.has(n.id));
+  }, [graph, selectedTaskId, directPredecessors]);
 
   const selectedTaskSuccessors = useMemo(() => {
     if (!graph || !selectedTaskId) return [];
-    const succIds = new Set(
-      graph.edges.filter((e) => e.predecessorTaskId === selectedTaskId).map((e) => e.successorTaskId)
-    );
-    return graph.nodes.filter((n) => succIds.has(n.id));
-  }, [graph, selectedTaskId]);
+    return graph.nodes.filter((n) => directSuccessors.has(n.id));
+  }, [graph, selectedTaskId, directSuccessors]);
+
+  const selectedTaskAncestors = useMemo(() => {
+    if (!graph || !selectedTaskId) return [];
+    return graph.nodes.filter((n) => allAncestors.has(n.id) && !directPredecessors.has(n.id));
+  }, [graph, selectedTaskId, allAncestors, directPredecessors]);
+
+  const selectedTaskDescendants = useMemo(() => {
+    if (!graph || !selectedTaskId) return [];
+    return graph.nodes.filter((n) => allDescendants.has(n.id) && !directSuccessors.has(n.id));
+  }, [graph, selectedTaskId, allDescendants, directSuccessors]);
 
   // Graph Mutations
   const addDependency = useCallback(
@@ -397,6 +434,8 @@ export function useDependencyGraph(
     selectedTask,
     selectedTaskPredecessors,
     selectedTaskSuccessors,
+    selectedTaskAncestors,
+    selectedTaskDescendants,
     layoutDirection,
     setLayoutDirection,
     highlightMode,

@@ -51,6 +51,8 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
     selectedTask,
     selectedTaskPredecessors,
     selectedTaskSuccessors,
+    selectedTaskAncestors,
+    selectedTaskDescendants,
     layoutDirection,
     setLayoutDirection,
     highlightMode,
@@ -195,7 +197,7 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
       {/* Graph Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80">
         {/* Left Controls: Legend & Metrics */}
-        <div className="flex items-center gap-4 text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
           <div className="flex items-center gap-1.5 text-zinc-300">
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
             <span>{graph.nodes.length} Tasks</span>
@@ -210,18 +212,60 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
               <span>{criticalPathData.criticalTaskIds.length} Critical ({criticalPathData.criticalPaths.length} path{criticalPathData.criticalPaths.length !== 1 ? 's' : ''})</span>
             </div>
           )}
-          <div className="hidden sm:flex items-center gap-3 pl-3 border-l border-zinc-800 text-[11px] text-zinc-400">
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-0.5 bg-amber-400 inline-block" /> Prerequisites
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-0.5 bg-sky-400 inline-block" /> Dependents
-            </span>
-          </div>
+          {selectedTask ? (
+            <div className="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[11px]">
+              <span className="text-zinc-400">Focus:</span>
+              <span className="text-emerald-400 font-semibold max-w-[140px] truncate">{selectedTask.title}</span>
+              <span className="text-amber-400 font-medium">({selectedTaskPredecessors.length} Preds{highlightMode === 'ALL' && selectedTaskAncestors.length > 0 ? `, +${selectedTaskAncestors.length} Anc` : ''})</span>
+              <span className="text-zinc-600">→</span>
+              <span className="text-sky-400 font-medium">({selectedTaskSuccessors.length} Succs{highlightMode === 'ALL' && selectedTaskDescendants.length > 0 ? `, +${selectedTaskDescendants.length} Desc` : ''})</span>
+            </div>
+          ) : (
+            <div className="hidden sm:flex items-center gap-3 pl-3 border-l border-zinc-800 text-[11px] text-zinc-400">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-0.5 bg-amber-400 inline-block" /> Prerequisites
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-0.5 bg-sky-400 inline-block" /> Dependents
+              </span>
+              {highlightMode === 'ALL' && (
+                <span className="flex items-center gap-1 text-emerald-400/80">
+                  <span className="w-2 h-0.5 bg-amber-400/60 border-t border-dashed border-amber-300 inline-block" /> Full Chain Active
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right Controls: View Settings */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Task Focus Dropdown */}
+          <div className="flex items-center gap-1">
+            <select
+              aria-label="Select task to inspect dependency chain"
+              value={selectedTaskId || ''}
+              onChange={(e) => setSelectedTaskId(e.target.value || null)}
+              className="px-2 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-300 focus:outline-none focus:ring-1 focus:ring-emerald-500 max-w-[160px] truncate"
+            >
+              <option value="">Focus: None (Click card)</option>
+              {graph.nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                </option>
+              ))}
+            </select>
+            {selectedTaskId && (
+              <button
+                type="button"
+                onClick={() => setSelectedTaskId(null)}
+                className="px-2 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-400 hover:text-zinc-200"
+                title="Clear selected task focus"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
           {/* Critical Path Mode Toggle */}
           <button
             type="button"
@@ -265,15 +309,38 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
 
           {/* Highlight mode */}
           <button
-            onClick={() => setHighlightMode(highlightMode === 'DIRECT' ? 'ALL' : 'DIRECT')}
-            title="Toggle direct vs full dependency chain highlighting"
-            className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-all ${
+            type="button"
+            onClick={() => {
+              if (!selectedTaskId && graph && graph.nodes.length > 0) {
+                // Auto-select a node with dependencies so the chain is immediately visible!
+                const candidate = graph.nodes.find((n) =>
+                  graph.edges.some((e) => e.predecessorTaskId === n.id || e.successorTaskId === n.id)
+                ) || graph.nodes[0];
+                if (candidate) {
+                  setSelectedTaskId(candidate.id);
+                  setHighlightMode(highlightMode === 'DIRECT' ? 'ALL' : 'DIRECT');
+                  return;
+                }
+              }
+              setHighlightMode(highlightMode === 'DIRECT' ? 'ALL' : 'DIRECT');
+            }}
+            title={
+              selectedTaskId
+                ? `Toggle direct vs full recursive ancestor/descendant chain highlighting for ${selectedTask?.title || 'selected task'}`
+                : 'Toggle direct vs full dependency chain highlighting (will focus a task)'
+            }
+            className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-all flex items-center gap-1.5 ${
               highlightMode === 'ALL'
-                ? 'bg-zinc-800 text-emerald-400 border-emerald-500/40 font-medium'
+                ? 'bg-zinc-800 text-emerald-400 border-emerald-500/40 font-semibold shadow-sm'
                 : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-200'
             }`}
           >
-            Chain: {highlightMode === 'DIRECT' ? 'Direct' : 'Full (Ancestors)'}
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                highlightMode === 'ALL' && selectedTaskId ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'
+              }`}
+            />
+            <span>Chain: {highlightMode === 'DIRECT' ? 'Direct' : 'Full (Ancestors)'}</span>
           </button>
 
           {/* List vs Visual toggle */}
@@ -377,6 +444,9 @@ export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({
               task={selectedTask}
               predecessors={selectedTaskPredecessors}
               successors={selectedTaskSuccessors}
+              ancestors={selectedTaskAncestors}
+              descendants={selectedTaskDescendants}
+              highlightMode={highlightMode}
               onClose={() => setSelectedTaskId(null)}
               onSelectTask={(id) => setSelectedTaskId(id)}
               onRemoveDependency={async (predId, succId) => {
